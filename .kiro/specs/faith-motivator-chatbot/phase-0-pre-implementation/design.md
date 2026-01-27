@@ -7,69 +7,44 @@ Phase 0 establishes the foundational specifications and development environment 
 ## 1. Frontend Architecture Design
 
 ### Technology Stack
-```typescript
-// Core Technologies
-- Framework: Next.js 14 (App Router)
-- Language: TypeScript
-- Styling: Tailwind CSS + Headless UI
-- State Management: Zustand
-- Authentication: AWS Cognito + NextAuth.js
-- API Client: TanStack Query (React Query)
-- Testing: Jest + React Testing Library + Playwright
-- Build Tool: Turbopack (Next.js built-in)
+```python
+# Core Technologies
+- Framework: Reflex (Python-based React framework)
+- Language: Python 3.9+
+- Styling: Reflex built-in styling system + Custom CSS
+- State Management: Reflex State classes
+- Authentication: AWS Cognito integration
+- API Client: httpx for async HTTP requests
+- Testing: pytest + pytest-asyncio
+- Build Tool: Reflex CLI
 ```
 
 ### Component Architecture
 ```
-src/
-├── app/                          # Next.js App Router
-│   ├── (auth)/                   # Auth route group
-│   │   ├── login/
-│   │   └── callback/
-│   ├── (dashboard)/              # Protected route group
-│   │   ├── chat/
-│   │   ├── history/
-│   │   └── settings/
-│   ├── layout.tsx                # Root layout
-│   ├── page.tsx                  # Home page
-│   └── globals.css               # Global styles
-├── components/                   # Reusable components
-│   ├── ui/                       # Base UI components
-│   │   ├── Button.tsx
-│   │   ├── Input.tsx
-│   │   ├── Modal.tsx
-│   │   └── index.ts
-│   ├── chat/                     # Chat-specific components
-│   │   ├── ChatInterface.tsx
-│   │   ├── MessageBubble.tsx
-│   │   ├── TypingIndicator.tsx
-│   │   └── PrayerConnectModal.tsx
-│   ├── layout/                   # Layout components
-│   │   ├── Header.tsx
-│   │   ├── Navigation.tsx
-│   │   └── Footer.tsx
-│   └── forms/                    # Form components
-│       ├── ConsentForm.tsx
-│       └── ContactForm.tsx
-├── lib/                          # Utilities and configurations
-│   ├── auth.ts                   # Authentication configuration
-│   ├── api.ts                    # API client setup
-│   ├── utils.ts                  # Utility functions
-│   └── validations.ts            # Form validation schemas
-├── hooks/                        # Custom React hooks
-│   ├── useAuth.ts
-│   ├── useChat.ts
-│   └── usePrayerConnect.ts
-├── store/                        # State management
-│   ├── authStore.ts
-│   ├── chatStore.ts
-│   └── index.ts
-├── types/                        # TypeScript type definitions
-│   ├── auth.ts
-│   ├── chat.ts
-│   └── api.ts
-└── styles/                       # Additional styles
-    └── components.css
+muykol-chatbot-app/
+├── frontend/                     # Reflex application
+│   ├── chatbot_app.py           # Main app entry point
+│   ├── components/              # Reusable components
+│   │   ├── __init__.py
+│   │   ├── auth_components.py   # Authentication UI
+│   │   ├── chat_components.py   # Chat interface
+│   │   ├── common.py           # Shared components
+│   │   ├── export_components.py # Data export UI
+│   │   ├── history_components.py # Chat history
+│   │   └── navigation.py       # Navigation components
+│   ├── state/                   # Application state management
+│   │   ├── __init__.py
+│   │   ├── auth_state.py       # Authentication state
+│   │   ├── chat_state.py       # Chat functionality state
+│   │   ├── export_state.py     # Data export state
+│   │   └── rate_limit_state.py # Rate limiting state
+│   ├── services/               # API integration
+│   │   ├── __init__.py
+│   │   ├── api_service.py      # Backend API client
+│   │   └── auth_service.py     # Authentication service
+│   ├── config.py               # Configuration management
+│   ├── requirements.txt        # Python dependencies
+│   └── rxconfig.py            # Reflex configuration
 ```
 
 ### Design System Specification
@@ -132,44 +107,203 @@ src/
 #### Component Specifications
 
 ##### Button Component
-```typescript
-interface ButtonProps {
-  variant: 'primary' | 'secondary' | 'outline' | 'ghost';
-  size: 'sm' | 'md' | 'lg';
-  disabled?: boolean;
-  loading?: boolean;
-  icon?: React.ReactNode;
-  children: React.ReactNode;
-  onClick?: () => void;
-}
+```python
+import reflex as rx
+from typing import Optional, Literal
 
-// Usage Examples:
-<Button variant="primary" size="md">Send Message</Button>
-<Button variant="outline" size="sm" icon={<PrayIcon />}>
-  Connect for Prayer
-</Button>
+def button(
+    text: str,
+    variant: Literal["primary", "secondary", "outline", "ghost"] = "primary",
+    size: Literal["sm", "md", "lg"] = "md",
+    disabled: bool = False,
+    loading: bool = False,
+    icon: Optional[str] = None,
+    on_click: Optional[rx.EventHandler] = None,
+    **props
+) -> rx.Component:
+    """Reusable button component with consistent styling"""
+    
+    base_styles = {
+        "border_radius": "0.5rem",
+        "font_weight": "500",
+        "transition": "all 0.2s",
+        "cursor": "pointer" if not disabled else "not-allowed",
+        "opacity": "0.6" if disabled else "1.0",
+    }
+    
+    variant_styles = {
+        "primary": {
+            "bg": "blue.500",
+            "color": "white",
+            "_hover": {"bg": "blue.600"},
+        },
+        "secondary": {
+            "bg": "gray.200",
+            "color": "gray.800",
+            "_hover": {"bg": "gray.300"},
+        },
+        "outline": {
+            "border": "1px solid",
+            "border_color": "blue.500",
+            "color": "blue.500",
+            "_hover": {"bg": "blue.50"},
+        },
+        "ghost": {
+            "bg": "transparent",
+            "color": "gray.600",
+            "_hover": {"bg": "gray.100"},
+        },
+    }
+    
+    size_styles = {
+        "sm": {"padding": "0.5rem 1rem", "font_size": "0.875rem"},
+        "md": {"padding": "0.75rem 1.5rem", "font_size": "1rem"},
+        "lg": {"padding": "1rem 2rem", "font_size": "1.125rem"},
+    }
+    
+    return rx.button(
+        rx.cond(
+            loading,
+            rx.spinner(size="sm", margin_right="0.5rem"),
+        ),
+        rx.cond(
+            icon,
+            rx.icon(icon, margin_right="0.5rem"),
+        ),
+        text,
+        on_click=on_click if not disabled else None,
+        **{**base_styles, **variant_styles[variant], **size_styles[size], **props}
+    )
+
+# Usage Examples:
+# button("Send Message", variant="primary", size="md")
+# button("Connect for Prayer", variant="outline", size="sm", icon="heart")
 ```
 
 ##### Chat Interface Component
-```typescript
-interface ChatInterfaceProps {
-  messages: Message[];
-  onSendMessage: (message: string) => void;
-  isTyping?: boolean;
-  disabled?: boolean;
-}
+```python
+import reflex as rx
+from typing import List, Dict, Any
 
-interface Message {
-  id: string;
-  content: string;
-  role: 'user' | 'assistant';
-  timestamp: Date;
-  metadata?: {
-    emotion?: EmotionClassification;
-    bibleVerse?: BiblicalContent;
-    prayerConnectOffered?: boolean;
-  };
-}
+class ChatState(rx.State):
+    messages: List[Dict[str, Any]] = []
+    current_message: str = ""
+    is_typing: bool = False
+    
+    async def send_message(self):
+        if not self.current_message.strip():
+            return
+            
+        # Add user message
+        user_message = {
+            "id": f"msg_{len(self.messages)}",
+            "content": self.current_message,
+            "role": "user",
+            "timestamp": rx.moment().format("YYYY-MM-DD HH:mm:ss"),
+        }
+        self.messages.append(user_message)
+        
+        # Clear input and show typing
+        message_to_send = self.current_message
+        self.current_message = ""
+        self.is_typing = True
+        
+        # Call backend API (implementation in services)
+        # response = await api_service.send_message(message_to_send)
+        
+        # Add assistant response (mock for now)
+        assistant_message = {
+            "id": f"msg_{len(self.messages)}",
+            "content": "Thank you for sharing. I'm here to listen and support you.",
+            "role": "assistant",
+            "timestamp": rx.moment().format("YYYY-MM-DD HH:mm:ss"),
+        }
+        self.messages.append(assistant_message)
+        self.is_typing = False
+
+def chat_interface() -> rx.Component:
+    """Main chat interface component"""
+    return rx.vstack(
+        # Chat messages area
+        rx.box(
+            rx.foreach(
+                ChatState.messages,
+                lambda message: message_bubble(message)
+            ),
+            rx.cond(
+                ChatState.is_typing,
+                typing_indicator(),
+            ),
+            height="400px",
+            overflow_y="auto",
+            padding="1rem",
+            border="1px solid",
+            border_color="gray.200",
+            border_radius="0.5rem",
+            margin_bottom="1rem",
+        ),
+        
+        # Message input area
+        rx.hstack(
+            rx.input(
+                placeholder="Type your message here...",
+                value=ChatState.current_message,
+                on_change=ChatState.set_current_message,
+                flex="1",
+                padding="0.75rem",
+                border_radius="0.5rem",
+            ),
+            button(
+                "Send",
+                variant="primary",
+                on_click=ChatState.send_message,
+                disabled=ChatState.is_typing,
+            ),
+            width="100%",
+        ),
+        width="100%",
+        max_width="800px",
+        margin="0 auto",
+    )
+
+def message_bubble(message: Dict[str, Any]) -> rx.Component:
+    """Individual message bubble component"""
+    is_user = message["role"] == "user"
+    
+    return rx.box(
+        rx.text(
+            message["content"],
+            color="white" if is_user else "gray.800",
+            font_size="1rem",
+            line_height="1.5",
+        ),
+        rx.text(
+            message["timestamp"],
+            color="gray.300" if is_user else "gray.500",
+            font_size="0.75rem",
+            margin_top="0.25rem",
+        ),
+        bg="blue.500" if is_user else "gray.100",
+        padding="1rem",
+        border_radius="1rem",
+        margin_bottom="1rem",
+        margin_left="auto" if is_user else "0",
+        margin_right="0" if is_user else "auto",
+        max_width="70%",
+    )
+
+def typing_indicator() -> rx.Component:
+    """Typing indicator component"""
+    return rx.box(
+        rx.hstack(
+            rx.text("Assistant is typing"),
+            rx.spinner(size="sm"),
+            spacing="0.5rem",
+        ),
+        color="gray.500",
+        font_style="italic",
+        padding="0.5rem",
+    )
 ```
 
 ### Responsive Design Breakpoints

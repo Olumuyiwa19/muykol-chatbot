@@ -2,7 +2,16 @@
 
 ## Architecture Overview
 
-Phase 1 establishes the foundational AWS infrastructure and core backend services that will support the entire faith-based motivator chatbot system. This phase focuses on security, scalability, and reliability from the ground up.
+Phase 1 establishes the foundational AWS infrastructure using Terraform and core backend services that will support the entire faith-based motivator chatbot system. This phase focuses on security, scalability, and reliability from the ground up.
+
+### Technology Stack
+- **Infrastructure**: Terraform (not CDK)
+- **Backend**: FastAPI with Python 3.9+
+- **Database**: DynamoDB with GSI indexes
+- **Authentication**: AWS Cognito User Pools
+- **Container Platform**: ECS Fargate
+- **Load Balancing**: Application Load Balancer
+- **Monitoring**: CloudWatch with structured logging
 
 ### High-Level Architecture
 

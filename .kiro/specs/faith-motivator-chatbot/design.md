@@ -9,7 +9,7 @@ The faith-based motivator chatbot follows a modern cloud-native architecture usi
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────────┐
 │   Web Frontend  │────│  Application     │────│   Amazon Bedrock    │
-│  (React/Next.js)│    │  Load Balancer   │    │   (LLM + Guardrails)│
+│  (Reflex/Python)│    │  Load Balancer   │    │   (LLM + Guardrails)│
 └─────────────────┘    └──────────────────┘    └─────────────────────┘
                                 │
                        ┌────────▼────────┐
@@ -33,8 +33,8 @@ The faith-based motivator chatbot follows a modern cloud-native architecture usi
 ## Component Design
 
 ### 1. Frontend Application
-**Technology:** Reflex with static export
-**Hosting:** S3 + CloudFront CDN
+**Technology:** Reflex (Python-based React framework)
+**Hosting:** S3 + CloudFront CDN (static export)
 **Features:**
 - Responsive chat interface
 - AWS Cognito authentication integration
@@ -42,7 +42,7 @@ The faith-based motivator chatbot follows a modern cloud-native architecture usi
 - Prayer connect consent flow
 
 ### 2. Backend API Service
-**Technology:** FastAPI or similar Python framework
+**Technology:** FastAPI with Python 3.9+
 **Hosting:** ECS Fargate with Application Load Balancer
 **Responsibilities:**
 - Chat message processing
