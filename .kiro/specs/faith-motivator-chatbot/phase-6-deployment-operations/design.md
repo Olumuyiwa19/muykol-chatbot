@@ -735,8 +735,9 @@ jobs:
         run: |
           # Create timestamped backup of state file
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          aws s3 cp s3://faith-chatbot-terraform-state/infrastructure/terraform.tfstate \
-                    s3://faith-chatbot-terraform-state/backups/terraform.tfstate.${TIMESTAMP}
+          # Terraform Cloud state is automatically backed up
+          # No manual backup needed - state is managed by Terraform Cloud
+          echo "Terraform state is managed by Terraform Cloud - automatic backups enabled"
       
       - name: Check for Infrastructure Drift
         id: drift-check

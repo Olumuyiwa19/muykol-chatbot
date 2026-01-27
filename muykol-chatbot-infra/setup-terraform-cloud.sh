@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-ORG_NAME="Kolayemi-org"  # Replace with your Terraform Cloud organization
+ORG_NAME="Kolayemi-org"
 PROJECT_NAME="muykol-chatbot"
 ENVIRONMENTS=("dev" "staging" "prod")
 

@@ -7,46 +7,52 @@ fileMatchPattern: "**/*.{py,ts,js,yaml,yml,json,tf}"
 
 ## Terraform State Management
 
-### Remote State Configuration
+### Terraform Cloud Configuration
 ```hcl
-# backend.tf
+# main.tf
 terraform {
-  backend "s3" {
-    bucket  = "faith-chatbot-terraform-state"
-    key     = "infrastructure/terraform.tfstate"
-    region  = "us-east-1"
-    encrypt = true
-  }
-}
-
-# State bucket with native locking
-resource "aws_s3_bucket" "terraform_state" {
-  bucket = "faith-chatbot-terraform-state"
+  required_version = ">= 1.0"
   
-  lifecycle {
-    prevent_destroy = true
+  cloud {
+    organization = "muykol-chatbot"
+    
+    workspaces {
+      tags = ["muykol-chatbot", "aws"]
+    }
   }
-}
-
-resource "aws_s3_bucket_versioning" "terraform_state" {
-  bucket = aws_s3_bucket.terraform_state.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "terraform_state" {
-  bucket = aws_s3_bucket.terraform_state.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+  
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
     }
   }
 }
 
-resource "aws_s3_bucket_public_access_block" "terraform_state" {
-  bucket = aws_s3_bucket.terraform_state.id
+# AWS Provider with default tags
+provider "aws" {
+  region = var.aws_region
+  
+  default_tags {
+    tags = {
+      Project     = "muykol-chatbot"
+      Environment = var.environment
+      ManagedBy   = "terraform-cloud"
+    }
+  }
+}
+```
+
+### Workspace Management
+- **muykol-chatbot-dev**: Development environment
+- **muykol-chatbot-staging**: Staging environment  
+- **muykol-chatbot-prod**: Production environment
+
+Each workspace manages its own state with:
+- Remote execution in Terraform Cloud
+- Encrypted state storage
+- Team access controls
+- Audit logging
 
   block_public_acls       = true
   block_public_policy     = true
