@@ -4,7 +4,7 @@ terraform {
   required_version = ">= 1.0"
   
   cloud {
-    organization = "muykol-chatbot"  # Replace with your Terraform Cloud org
+    organization = "Kolayemi-org"  # Updated to actual org name
     
     workspaces {
       tags = ["muykol-chatbot", "aws"]

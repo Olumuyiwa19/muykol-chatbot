@@ -8,14 +8,14 @@ If the automated script doesn't work, follow these manual steps:
 3. Export it: `export TF_API_TOKEN=your-token-here`
 
 ## 2. Create Organization
-1. Go to https://app.terraform.io
-2. Create organization: `Kolayemi-org`
+1. Go to https://app.terraform.io ✅
+2. Create organization: `Kolayemi-org` ✅
 
-## 3. Create Workspaces Manually
+## 3. Create Workspaces Manually ✅
 
-### For each environment (dev, staging, prod):
+### Workspaces created (dev, staging, prod):
 
-1. **Go to Workspaces**: https://app.terraform.io/app/muykol-chatbot/workspaces
+1. **Go to Workspaces**: https://app.terraform.io/app/Kolayemi-org/workspaces ✅
 2. **Click "New workspace"**
 3. **Choose "CLI-driven workflow"**
 4. **Configure workspace**:
@@ -51,7 +51,7 @@ Test if your token works:
 ```bash
 curl -H "Authorization: Bearer $TF_API_TOKEN" \
      -H "Content-Type: application/vnd.api+json" \
-     https://app.terraform.io/api/v2/organizations/muykol-chatbot
+     https://app.terraform.io/api/v2/organizations/Kolayemi-org
 ```
 
 Should return organization details if successful.

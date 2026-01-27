@@ -16,7 +16,7 @@ terraform login
 ```
 
 ### 2. Create Organization
-Create a new organization in Terraform Cloud named `muykol-chatbot` (or update the org name in `main.tf`)
+Create a new organization in Terraform Cloud named `Kolayemi-org` ✅ (Already done)
 
 ### 3. Run Setup Script
 ```bash
@@ -27,7 +27,7 @@ cd muykol-chatbot-infra
 ### 4. Configure Workspaces
 For each workspace (dev, staging, prod):
 
-1. Go to https://app.terraform.io/app/muykol-chatbot/workspaces
+1. Go to https://app.terraform.io/app/Kolayemi-org/workspaces ✅
 2. Select the workspace
 3. Go to Variables tab
 4. Add environment variables:
