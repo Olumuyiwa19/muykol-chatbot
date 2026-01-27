@@ -4,10 +4,10 @@ terraform {
   required_version = ">= 1.0"
   
   cloud {
-    organization = "Kolayemi-org"  # Updated to actual org name
+    organization = "Kolayemi-org"
     
     workspaces {
-      tags = ["muykol-chatbot", "aws"]
+      name = "muykol-chatbot-dev"  # Will be overridden by workspace selection
     }
   }
   
