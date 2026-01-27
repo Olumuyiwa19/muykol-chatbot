@@ -22,25 +22,42 @@
   - Implement graceful shutdown handling for rolling deployments
   - Configure deregistration delay for zero-downtime deployments
 
-### 14.2 Set up CI/CD pipeline
-- [ ] 14.2.1 GitHub Actions workflow for automated testing
-  - Create comprehensive workflow with test, build, and deploy stages
-  - Configure test execution with coverage reporting
-  - Set up security scanning (SAST, dependency scanning)
-  - Implement quality gates preventing deployment on test failures
-  - Configure parallel test execution for faster feedback
-- [ ] 14.2.2 Docker image building and ECR push
-  - Create optimized Dockerfile with multi-stage builds
-  - Configure ECR repository with lifecycle policies
-  - Implement image vulnerability scanning with Trivy
-  - Set up image signing and verification
-  - Configure automated image cleanup and retention policies
-- [ ] 14.2.3 Blue-green deployment strategy
-  - Implement blue-green deployment using ECS service updates
-  - Configure traffic shifting and validation procedures
-  - Set up automated rollback triggers based on health checks
-  - Implement deployment approval workflows for production
-  - Create deployment status monitoring and notifications
+### 14.2 Set up CI/CD pipeline architecture
+- [ ] 14.2.1 Infrastructure CI pipeline for feature branches
+  - Create GitHub Actions workflow for infrastructure validation on PRs
+  - Configure Terraform format checking, validation, and planning
+  - Implement Checkov security scanning for infrastructure code
+  - Set up automated PR comments with Terraform plan results
+  - Configure infrastructure security findings reporting to GitHub Security tab
+  - Implement infrastructure change detection and conditional execution
+- [ ] 14.2.2 Application CI pipeline for feature branches
+  - Create GitHub Actions workflow for application validation on PRs
+  - Configure Python code quality checks (black, isort, flake8, mypy)
+  - Implement CodeQL security analysis for application code
+  - Set up comprehensive test suite execution (unit, integration, security)
+  - Configure Docker image building and Trivy vulnerability scanning
+  - Implement test coverage reporting and quality gates
+- [ ] 14.2.3 Infrastructure CD pipeline for main branch
+  - Create GitHub Actions workflow for infrastructure deployment
+  - Configure Terraform apply with environment-specific variables
+  - Implement infrastructure state backup and drift detection
+  - Set up infrastructure deployment approval workflows for production
+  - Configure infrastructure failure notifications and issue creation
+  - Implement infrastructure deployment status reporting
+- [ ] 14.2.4 Application CD pipeline for main branch
+  - Create GitHub Actions workflow for application deployment
+  - Configure Docker image building, scanning, and ECR push
+  - Implement ECS service deployment with multiple strategies (rolling, blue-green, canary)
+  - Set up staging deployment with automated smoke tests
+  - Configure production deployment with comprehensive validation
+  - Implement deployment rollback capabilities and monitoring
+- [ ] 14.2.5 Coordinated CI/CD orchestration
+  - Create coordinated pipeline for infrastructure and application changes
+  - Implement change detection to trigger appropriate pipelines
+  - Configure dependency management between infrastructure and application deployments
+  - Set up post-deployment validation and system health checks
+  - Implement comprehensive deployment reporting and notifications
+  - Configure OIDC authentication for secure AWS access from GitHub Actions
 
 ### 14.3 Configure CloudFront distribution
 - [ ] 14.3.1 S3 bucket for static frontend assets

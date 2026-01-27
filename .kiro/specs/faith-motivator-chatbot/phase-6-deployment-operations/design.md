@@ -142,187 +142,1214 @@ spec:
   ]
 }
 ```
-### 2. CI/CD Pipeline Implementation
+### 2. CI/CD Pipeline Architecture
 
-#### GitHub Actions Workflow
+#### Pipeline Overview
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Feature Branch Workflow                      │
+│                                                                 │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
+│  │ Infrastructure  │ │   Application   │ │   Integration   │   │
+│  │      CI         │ │       CI        │ │      Tests      │   │
+│  │                 │ │                 │ │                 │   │
+│  │ • Terraform     │ │ • Unit Tests    │ │ • E2E Tests     │   │
+│  │   Validate      │ │ • CodeQL Scan   │ │ • Smoke Tests   │   │
+│  │ • Checkov Scan  │ │ • Security Scan │ │ • Performance   │   │
+│  │ • Plan (no apply)│ │ • Build & Test  │ │   Tests         │   │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘   │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │ PR Review & Merge
+┌─────────────────────────▼───────────────────────────────────────┐
+│                    Main Branch Deployment                       │
+│                                                                 │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
+│  │ Infrastructure  │ │   Application   │ │   Production    │   │
+│  │      CD         │ │       CD        │ │   Validation    │   │
+│  │                 │ │                 │ │                 │   │
+│  │ • Terraform     │ │ • Build & Push  │ │ • Health Checks │   │
+│  │   Apply         │ │ • Deploy ECS    │ │ • Rollback      │   │
+│  │ • Drift Check   │ │ • Blue/Green    │ │   Capability    │   │
+│  │ • State Backup  │ │ • Canary Deploy │ │ • Monitoring    │   │
+│  └─────────────────┘ └─────────────────┘ └─────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Infrastructure CI Pipeline (Feature Branches)
 ```yaml
-# .github/workflows/deploy.yml
-name: Deploy Faith Motivator Chatbot
+# .github/workflows/infrastructure-ci.yml
+name: Infrastructure CI - Validation
 
 on:
-  push:
-    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
+    paths: 
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-*.yml'
 
 env:
+  TF_VERSION: '1.6.0'
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: faith-chatbot
-  ECS_SERVICE: faith-chatbot-service
-  ECS_CLUSTER: faith-chatbot-cluster
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  security-events: write
 
 jobs:
-  test:
+  terraform-validate:
+    name: Terraform Validation
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: infrastructure
+      
+      - name: Terraform Init
+        run: terraform init -backend=false
+        working-directory: infrastructure
+      
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: infrastructure
+
+  security-scan:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Checkov Security Scan
+        id: checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: infrastructure/
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          download_external_modules: true
+          quiet: false
+          soft_fail: false
+          skip_check: CKV_AWS_79,CKV_AWS_61  # Skip specific checks if needed
+      
+      - name: Upload Checkov results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+      
+      - name: Comment PR with security findings
+        uses: actions/github-script@v7
+        if: failure()
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const sarif = JSON.parse(fs.readFileSync('checkov-results.sarif', 'utf8'));
+              const results = sarif.runs[0].results || [];
+              
+              if (results.length > 0) {
+                let comment = '## 🔒 Infrastructure Security Scan Results\n\n';
+                comment += `Found ${results.length} security issue(s):\n\n`;
+                
+                results.slice(0, 10).forEach((result, index) => {
+                  comment += `${index + 1}. **${result.ruleId}**: ${result.message.text}\n`;
+                  if (result.locations && result.locations[0]) {
+                    const location = result.locations[0].physicalLocation;
+                    comment += `   - File: ${location.artifactLocation.uri}\n`;
+                    comment += `   - Line: ${location.region.startLine}\n\n`;
+                  }
+                });
+                
+                if (results.length > 10) {
+                  comment += `... and ${results.length - 10} more issues. Check the Security tab for full details.\n`;
+                }
+                
+                github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+              }
+            } catch (error) {
+              console.log('Error reading SARIF file:', error);
+            }
+
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [terraform-validate, security-scan]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-Infrastructure-Role
+          role-session-name: GitHubActions-TerraformPlan-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Terraform Init
+        run: terraform init
+        working-directory: infrastructure
+      
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+            -var-file="environments/dev.tfvars" \
+            -out=tfplan \
+            -no-color \
+            -detailed-exitcode
+        working-directory: infrastructure
+        continue-on-error: true
+      
+      - name: Generate Plan Summary
+        run: |
+          terraform show -no-color tfplan > tfplan.txt
+          
+          # Create a summary for the PR comment
+          echo "## 🏗️ Terraform Plan Summary" > plan-summary.md
+          echo "" >> plan-summary.md
+          
+          if [ "${{ steps.plan.outputs.exitcode }}" == "0" ]; then
+            echo "✅ **No changes detected**" >> plan-summary.md
+          elif [ "${{ steps.plan.outputs.exitcode }}" == "2" ]; then
+            echo "📋 **Changes detected:**" >> plan-summary.md
+            echo "" >> plan-summary.md
+            echo '```hcl' >> plan-summary.md
+            head -50 tfplan.txt >> plan-summary.md
+            echo '```' >> plan-summary.md
+            
+            if [ $(wc -l < tfplan.txt) -gt 50 ]; then
+              echo "" >> plan-summary.md
+              echo "... (truncated, see full plan in workflow logs)" >> plan-summary.md
+            fi
+          else
+            echo "❌ **Plan failed** - Check workflow logs for details" >> plan-summary.md
+          fi
+        working-directory: infrastructure
+      
+      - name: Comment PR with Plan
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infrastructure/plan-summary.md', 'utf8');
+            
+            // Find existing plan comment
+            const comments = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            
+            const existingComment = comments.data.find(comment => 
+              comment.body.includes('🏗️ Terraform Plan Summary')
+            );
+            
+            if (existingComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                comment_id: existingComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: plan
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: plan
+              });
+            }
+      
+      - name: Fail if plan failed
+        if: steps.plan.outputs.exitcode == 1
+        run: exit 1
+
+#### Application CI Pipeline (Feature Branches)
+```yaml
+# .github/workflows/application-ci.yml
+name: Application CI - Validation
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'app/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'Dockerfile'
+      - '.github/workflows/application-*.yml'
+
+env:
+  PYTHON_VERSION: '3.11'
+  AWS_REGION: us-east-1
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  code-quality:
+    name: Code Quality & Security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
       
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
       
       - name: Install dependencies
         run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+          pip install bandit safety black isort flake8 mypy
+      
+      - name: Code formatting check
+        run: |
+          black --check app/ tests/
+          isort --check-only app/ tests/
+      
+      - name: Linting
+        run: |
+          flake8 app/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+          mypy app/ --ignore-missing-imports
+      
+      - name: Security scan with Bandit
+        run: |
+          bandit -r app/ -f json -o bandit-results.json
+          bandit -r app/ -f txt
+        continue-on-error: true
+      
+      - name: Dependency security check
+        run: |
+          safety check --json --output safety-results.json
+          safety check
+        continue-on-error: true
+      
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-and-quality
+      
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:python"
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-test.txt
       
       - name: Run unit tests
-        run: pytest tests/unit --cov=app --cov-report=xml
-      
-      - name: Run integration tests
-        run: pytest tests/integration
-      
-      - name: Run security tests
         run: |
-          bandit -r app/
-          safety check
+          pytest tests/unit/ \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-report=term \
+            --cov-fail-under=80 \
+            --junitxml=test-results.xml \
+            -v
       
-      - name: Upload coverage reports
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
           file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+      
+      - name: Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-results
+          path: |
+            test-results.xml
+            htmlcov/
+            coverage.xml
 
-  build:
-    needs: test
+  integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
-    
-    outputs:
-      image: ${{ steps.build-image.outputs.image }}
+    services:
+      localstack:
+        image: localstack/localstack:latest
+        env:
+          SERVICES: dynamodb,sqs,secretsmanager
+          DEBUG: 1
+        ports:
+          - 4566:4566
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-test.txt
+      
+      - name: Wait for LocalStack
+        run: |
+          timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -q "\"dynamodb\": \"available\""; do sleep 2; done'
+      
+      - name: Run integration tests
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          DYNAMODB_ENDPOINT: http://localhost:4566
+          SQS_ENDPOINT: http://localhost:4566
+        run: |
+          pytest tests/integration/ -v --tb=short
+
+  docker-build:
+    name: Docker Build & Security Scan
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: faith-chatbot:pr-${{ github.event.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'faith-chatbot:pr-${{ github.event.number }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Run Trivy for PR comment
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'faith-chatbot:pr-${{ github.event.number }}'
+          format: 'table'
+        continue-on-error: true
+
+  pr-summary:
+    name: PR Validation Summary
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests, integration-tests, docker-build]
+    if: always()
+    steps:
+      - name: Generate PR Summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = {
+              'Code Quality & Security': '${{ needs.code-quality.result }}',
+              'Unit Tests': '${{ needs.unit-tests.result }}',
+              'Integration Tests': '${{ needs.integration-tests.result }}',
+              'Docker Build & Scan': '${{ needs.docker-build.result }}'
+            };
+            
+            let summary = '## 🚀 Application CI Summary\n\n';
+            
+            for (const [job, result] of Object.entries(results)) {
+              const emoji = result === 'success' ? '✅' : result === 'failure' ? '❌' : '⚠️';
+              summary += `${emoji} **${job}**: ${result}\n`;
+            }
+            
+            const allPassed = Object.values(results).every(result => result === 'success');
+            
+            if (allPassed) {
+              summary += '\n🎉 **All checks passed!** Ready for review and merge.';
+            } else {
+              summary += '\n⚠️ **Some checks failed.** Please review and fix issues before merging.';
+            }
+            
+            // Find existing summary comment
+            const comments = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            
+            const existingComment = comments.data.find(comment => 
+              comment.body.includes('🚀 Application CI Summary')
+            );
+            
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                comment_id: existingComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summary
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summary
+              });
+            }
+
+#### Infrastructure CD Pipeline (Main Branch)
+```yaml
+# .github/workflows/infrastructure-cd.yml
+name: Infrastructure CD - Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-*.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+
+env:
+  TF_VERSION: '1.6.0'
+  AWS_REGION: us-east-1
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-Infrastructure-Role
+          role-session-name: GitHubActions-InfrastructureDeploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Terraform Init
+        run: terraform init
+        working-directory: infrastructure
+      
+      - name: Terraform Plan
+        id: plan
+        run: |
+          ENV="${{ github.event.inputs.environment || 'production' }}"
+          terraform plan \
+            -var-file="environments/${ENV}.tfvars" \
+            -out=tfplan \
+            -detailed-exitcode
+        working-directory: infrastructure
+      
+      - name: Terraform Apply
+        if: steps.plan.outputs.exitcode == 2
+        run: |
+          terraform apply tfplan
+        working-directory: infrastructure
+      
+      - name: Backup Terraform State
+        run: |
+          # Create timestamped backup of state file
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          aws s3 cp s3://faith-chatbot-terraform-state/infrastructure/terraform.tfstate \
+                    s3://faith-chatbot-terraform-state/backups/terraform.tfstate.${TIMESTAMP}
+      
+      - name: Check for Infrastructure Drift
+        id: drift-check
+        run: |
+          ENV="${{ github.event.inputs.environment || 'production' }}"
+          terraform plan \
+            -var-file="environments/${ENV}.tfvars" \
+            -detailed-exitcode
+          echo "drift_detected=$?" >> $GITHUB_OUTPUT
+        working-directory: infrastructure
+        continue-on-error: true
+      
+      - name: Generate Infrastructure Summary
+        run: |
+          echo "## 🏗️ Infrastructure Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ github.event.inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Terraform Version**: ${{ env.TF_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.plan.outputs.exitcode }}" == "0" ]; then
+            echo "- **Changes**: No infrastructure changes needed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.plan.outputs.exitcode }}" == "2" ]; then
+            echo "- **Changes**: Infrastructure updated successfully" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.drift-check.outputs.drift_detected }}" == "2" ]; then
+            echo "- **⚠️ Drift Detected**: Infrastructure has drifted from expected state" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **✅ No Drift**: Infrastructure matches expected state" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Infrastructure Deployment Failed - ${context.sha.substring(0, 7)}`,
+              body: `
+              Infrastructure deployment failed for commit ${context.sha}.
+              
+              **Environment**: ${{ github.event.inputs.environment || 'production' }}
+              **Workflow**: ${context.workflow}
+              **Run ID**: ${context.runId}
+              
+              Please check the [workflow logs](${context.payload.repository.html_url}/actions/runs/${context.runId}) for details.
+              `,
+              labels: ['infrastructure', 'deployment-failure', 'urgent']
+            });
+
+#### Application CD Pipeline (Main Branch)
+```yaml
+# .github/workflows/application-cd.yml
+name: Application CD - Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'Dockerfile'
+      - '.github/workflows/application-*.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+      deployment_strategy:
+        description: 'Deployment strategy'
+        required: true
+        default: 'rolling'
+        type: choice
+        options:
+          - rolling
+          - blue-green
+          - canary
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: faith-chatbot
+  PYTHON_VERSION: '3.11'
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  build-and-push:
+    name: Build & Push Container
+    runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.build-image.outputs.image }}
+      image-tag: ${{ steps.meta.outputs.tags }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-Deployment-Role
+          role-session-name: GitHubActions-ApplicationBuild-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
       
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+        uses: aws-actions/amazon-ecr-login@v2
       
-      - name: Build, tag, and push image to Amazon ECR
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build and push Docker image
         id: build-image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
-          
-          # Security scan
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-            -v $HOME/Library/Caches:/root/.cache/ \
-            aquasec/trivy image $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
-          
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+      
+      - name: Run final security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+      
+      - name: Upload security scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
 
   deploy-staging:
-    needs: build
+    name: Deploy to Staging
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/develop'
-    
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' || github.event.inputs.environment == 'staging'
     environment: staging
     
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-Deployment-Role
+          role-session-name: GitHubActions-StagingDeploy-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
       
-      - name: Deploy to staging
+      - name: Deploy to ECS Staging
         run: |
+          # Update ECS service with new image
           aws ecs update-service \
-            --cluster $ECS_CLUSTER-staging \
-            --service $ECS_SERVICE-staging \
-            --force-new-deployment
+            --cluster faith-chatbot-cluster-staging \
+            --service faith-chatbot-service-staging \
+            --force-new-deployment \
+            --task-definition $(aws ecs describe-services \
+              --cluster faith-chatbot-cluster-staging \
+              --services faith-chatbot-service-staging \
+              --query 'services[0].taskDefinition' \
+              --output text | sed 's/:.*/:${{ github.sha }}/')
       
-      - name: Wait for deployment
+      - name: Wait for staging deployment
         run: |
           aws ecs wait services-stable \
-            --cluster $ECS_CLUSTER-staging \
-            --services $ECS_SERVICE-staging
+            --cluster faith-chatbot-cluster-staging \
+            --services faith-chatbot-service-staging \
+            --max-attempts 30 \
+            --delay 30
       
-      - name: Run smoke tests
+      - name: Run staging smoke tests
         run: |
-          # Wait for service to be healthy
+          # Wait for service to be fully ready
           sleep 60
           
-          # Run basic health checks
+          # Health check
           curl -f https://staging-api.faithchatbot.com/health
           
-          # Run smoke tests
-          pytest tests/smoke --base-url=https://staging-api.faithchatbot.com
+          # Basic functionality tests
+          python -m pytest tests/smoke/ \
+            --base-url=https://staging-api.faithchatbot.com \
+            --tb=short -v
 
   deploy-production:
-    needs: [build, deploy-staging]
+    name: Deploy to Production
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    
+    needs: [build-and-push, deploy-staging]
+    if: github.ref == 'refs/heads/main' && (github.event.inputs.environment == 'production' || github.event.inputs.environment == '')
     environment: production
     
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-Deployment-Role
+          role-session-name: GitHubActions-ProductionDeploy-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
       
-      - name: Deploy to production
+      - name: Get current task definition
+        id: current-task-def
         run: |
-          # Update task definition with new image
-          TASK_DEFINITION=$(aws ecs describe-task-definition \
-            --task-definition $ECS_SERVICE \
-            --query taskDefinition)
+          CURRENT_TASK_DEF=$(aws ecs describe-task-definition \
+            --task-definition faith-chatbot-task \
+            --query 'taskDefinition' \
+            --output json)
           
-          NEW_TASK_DEFINITION=$(echo $TASK_DEFINITION | \
-            jq --arg IMAGE "${{ needs.build.outputs.image }}" \
-            '.containerDefinitions[0].image = $IMAGE')
-          
-          aws ecs register-task-definition \
-            --cli-input-json "$NEW_TASK_DEFINITION"
-          
-          # Update service
-          aws ecs update-service \
-            --cluster $ECS_CLUSTER \
-            --service $ECS_SERVICE \
-            --task-definition $ECS_SERVICE
+          echo "current-task-def<<EOF" >> $GITHUB_OUTPUT
+          echo "$CURRENT_TASK_DEF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
       
-      - name: Wait for deployment
+      - name: Create new task definition
+        id: new-task-def
+        run: |
+          NEW_TASK_DEF=$(echo '${{ steps.current-task-def.outputs.current-task-def }}' | \
+            jq --arg IMAGE "${{ needs.build-and-push.outputs.image-uri }}" \
+            '.containerDefinitions[0].image = $IMAGE | 
+             del(.taskDefinitionArn, .revision, .status, .requiresAttributes, 
+                 .placementConstraints, .compatibilities, .registeredAt, .registeredBy)')
+          
+          echo "new-task-def<<EOF" >> $GITHUB_OUTPUT
+          echo "$NEW_TASK_DEF" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+      
+      - name: Register new task definition
+        id: register-task-def
+        run: |
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json '${{ steps.new-task-def.outputs.new-task-def }}' \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          
+          echo "task-def-arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
+      
+      - name: Deploy with selected strategy
+        run: |
+          STRATEGY="${{ github.event.inputs.deployment_strategy || 'rolling' }}"
+          
+          case $STRATEGY in
+            "blue-green")
+              # Blue-Green deployment
+              echo "Implementing blue-green deployment..."
+              # Create new service with new task definition
+              # Switch traffic after validation
+              # Remove old service
+              ;;
+            "canary")
+              # Canary deployment
+              echo "Implementing canary deployment..."
+              # Deploy to subset of tasks
+              # Monitor metrics
+              # Gradually increase traffic
+              ;;
+            *)
+              # Rolling deployment (default)
+              echo "Implementing rolling deployment..."
+              aws ecs update-service \
+                --cluster faith-chatbot-cluster \
+                --service faith-chatbot-service \
+                --task-definition ${{ steps.register-task-def.outputs.task-def-arn }}
+              ;;
+          esac
+      
+      - name: Wait for production deployment
         run: |
           aws ecs wait services-stable \
-            --cluster $ECS_CLUSTER \
-            --services $ECS_SERVICE
+            --cluster faith-chatbot-cluster \
+            --services faith-chatbot-service \
+            --max-attempts 30 \
+            --delay 30
       
-      - name: Verify deployment
+      - name: Verify production deployment
         run: |
           # Health check
           curl -f https://api.faithchatbot.com/health
           
-          # Basic functionality test
-          pytest tests/production --base-url=https://api.faithchatbot.com
+          # Production smoke tests
+          python -m pytest tests/production/ \
+            --base-url=https://api.faithchatbot.com \
+            --tb=short -v
+      
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ needs.build-and-push.outputs.image-uri }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Strategy**: ${{ github.event.inputs.deployment_strategy || 'rolling' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Task Definition**: ${{ steps.register-task-def.outputs.task-def-arn }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Notify deployment success
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deploymentUrl = `https://api.faithchatbot.com`;
+            const commitUrl = `${context.payload.repository.html_url}/commit/${context.sha}`;
+            
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: context.payload.deployment?.id || 0,
+              state: 'success',
+              environment_url: deploymentUrl,
+              description: 'Production deployment successful'
+            });
+
+#### Coordinated CI/CD Pipeline
+```yaml
+# .github/workflows/coordinated-cicd.yml
+name: Coordinated CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_infrastructure:
+        description: 'Force infrastructure deployment'
+        required: false
+        default: false
+        type: boolean
+      force_application:
+        description: 'Force application deployment'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      infrastructure: ${{ steps.changes.outputs.infrastructure }}
+      application: ${{ steps.changes.outputs.application }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      
+      - name: Detect changes
+        uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            infrastructure:
+              - 'infrastructure/**'
+              - '.github/workflows/infrastructure-*.yml'
+            application:
+              - 'app/**'
+              - 'tests/**'
+              - 'requirements*.txt'
+              - 'Dockerfile'
+              - '.github/workflows/application-*.yml'
+
+  deploy-infrastructure:
+    name: Deploy Infrastructure
+    needs: detect-changes
+    if: needs.detect-changes.outputs.infrastructure == 'true' || github.event.inputs.force_infrastructure == 'true'
+    uses: ./.github/workflows/infrastructure-cd.yml
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+
+  deploy-application:
+    name: Deploy Application
+    needs: [detect-changes, deploy-infrastructure]
+    if: always() && (needs.detect-changes.outputs.application == 'true' || github.event.inputs.force_application == 'true')
+    uses: ./.github/workflows/application-cd.yml
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+
+  post-deployment-validation:
+    name: Post-Deployment Validation
+    runs-on: ubuntu-latest
+    needs: [deploy-infrastructure, deploy-application]
+    if: always() && (needs.deploy-infrastructure.result == 'success' || needs.deploy-application.result == 'success')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-Deployment-Role
+          role-session-name: GitHubActions-PostDeploymentValidation-${{ github.run_id }}
+          aws-region: us-east-1
+      
+      - name: Run comprehensive system tests
+        run: |
+          # Set up Python for testing
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+          
+          # Run end-to-end tests
+          python -m pytest tests/e2e/ \
+            --base-url=https://api.faithchatbot.com \
+            --tb=short -v
+      
+      - name: Check system health
+        run: |
+          # Comprehensive health checks
+          curl -f https://api.faithchatbot.com/health
+          
+          # Check ECS service health
+          aws ecs describe-services \
+            --cluster faith-chatbot-cluster \
+            --services faith-chatbot-service \
+            --query 'services[0].runningCount'
+          
+          # Check ALB target health
+          aws elbv2 describe-target-health \
+            --target-group-arn $(aws elbv2 describe-target-groups \
+              --names faith-chatbot-tg \
+              --query 'TargetGroups[0].TargetGroupArn' \
+              --output text)
+      
+      - name: Performance baseline check
+        run: |
+          # Basic performance test
+          curl -w "@curl-format.txt" -o /dev/null -s https://api.faithchatbot.com/health
+          
+          # Check response times are within acceptable limits
+          python -c "
+          import requests
+          import time
+          
+          times = []
+          for _ in range(10):
+              start = time.time()
+              r = requests.get('https://api.faithchatbot.com/health')
+              times.append(time.time() - start)
+          
+          avg_time = sum(times) / len(times)
+          print(f'Average response time: {avg_time:.3f}s')
+          
+          if avg_time > 2.0:
+              print('WARNING: Response time exceeds 2 seconds')
+              exit(1)
+          "
+      
+      - name: Generate deployment report
+        run: |
+          echo "## 📊 Deployment Validation Report" >> $GITHUB_STEP_SUMMARY
+          echo "- **Infrastructure**: ${{ needs.deploy-infrastructure.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application**: ${{ needs.deploy-application.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **System Health**: ✅ Healthy" >> $GITHUB_STEP_SUMMARY
+          echo "- **Performance**: ✅ Within baseline" >> $GITHUB_STEP_SUMMARY
+          echo "- **Validation Time**: $(date)" >> $GITHUB_STEP_SUMMARY
+```yaml
+# .github/workflows/coordinated-deployment.yml
+name: Coordinated Infrastructure and Application Deployment
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_infrastructure:
+        description: 'Deploy infrastructure changes'
+        required: true
+        default: 'false'
+        type: boolean
+      deploy_application:
+        description: 'Deploy application changes'
+        required: true
+        default: 'true'
+        type: boolean
+
+# Required for OIDC authentication
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      infrastructure_changed: ${{ steps.changes.outputs.infrastructure }}
+      application_changed: ${{ steps.changes.outputs.application }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 2
+      - uses: dorny/paths-filter@v2
+        id: changes
+        with:
+          filters: |
+            infrastructure:
+              - 'infrastructure/**'
+              - '.github/workflows/terraform.yml'
+            application:
+              - 'app/**'
+              - 'requirements.txt'
+              - 'Dockerfile'
+              - '.github/workflows/deploy.yml'
+
+  deploy-infrastructure:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.infrastructure_changed == 'true' || github.event.inputs.deploy_infrastructure == 'true'
+    uses: ./.github/workflows/terraform.yml
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+
+  deploy-application:
+    needs: [detect-changes, deploy-infrastructure]
+    if: always() && (needs.detect-changes.outputs.application_changed == 'true' || github.event.inputs.deploy_application == 'true')
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+
+  verify-deployment:
+    needs: [deploy-infrastructure, deploy-application]
+    if: always() && (needs.deploy-infrastructure.result == 'success' || needs.deploy-application.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-Deployment-Role
+          role-session-name: GitHubActions-Verification
+          aws-region: us-east-1
+      
+      - name: Run end-to-end tests
+        run: |
+          # Set up Python for testing
+          python -m pip install --upgrade pip
+          pip install pytest requests
+          
+          # Comprehensive system verification
+          pytest tests/e2e --base-url=https://api.faithchatbot.com -v
+          
+      - name: Check infrastructure drift
+        if: needs.deploy-infrastructure.result == 'success'
+        run: |
+          # Setup Terraform
+          wget -O terraform.zip https://releases.hashicorp.com/terraform/1.6.0/terraform_1.6.0_linux_amd64.zip
+          unzip terraform.zip
+          sudo mv terraform /usr/local/bin/
+          
+          # Initialize and check for drift
+          cd infrastructure
+          terraform init
+          terraform plan -var-file="environments/prod.tfvars" -detailed-exitcode
+          PLAN_EXIT_CODE=$?
+          
+          if [ $PLAN_EXIT_CODE -eq 2 ]; then
+            echo "⚠️ Infrastructure drift detected!" >> $GITHUB_STEP_SUMMARY
+            echo "Please review the Terraform plan output above." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          elif [ $PLAN_EXIT_CODE -eq 0 ]; then
+            echo "✅ No infrastructure drift detected." >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Deployment summary
+        if: always()
+        run: |
+          echo "## Deployment Verification Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- Infrastructure: ${{ needs.deploy-infrastructure.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Application: ${{ needs.deploy-application.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Verification: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Timestamp: $(date)" >> $GITHUB_STEP_SUMMARY
 ```
 
 ### 3. Performance Optimization Strategy

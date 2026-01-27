@@ -2,11 +2,11 @@
 
 ## 1. AWS Infrastructure Setup
 
-### 1.1 Create AWS CDK/Terraform infrastructure code
+### 1.1 Create Terraform infrastructure code
 - [ ] 1.1.1 VPC with private/public subnets across multiple AZs
-  - Create VPC with CIDR 10.0.0.0/16
-  - Configure public subnets (10.0.1.0/24, 10.0.2.0/24) in AZ-a and AZ-b
-  - Configure private subnets (10.0.3.0/24, 10.0.4.0/24) in AZ-a and AZ-b
+  - Create VPC with CIDR 172.20.0.0/20
+  - Configure public subnets (172.20.1.0/24, 172.20.2.0/24) in AZ-a and AZ-b
+  - Configure private subnets (172.20.3.0/24, 172.20.4.0/24) in AZ-a and AZ-b
   - Set up Internet Gateway for public subnets
   - Configure route tables for public and private subnets
 - [ ] 1.1.2 VPC endpoints for AWS services (Bedrock, DynamoDB, SES, etc.)
@@ -24,6 +24,14 @@
   - Create ECS task role with Bedrock, DynamoDB, and SQS permissions
   - Create Lambda execution role for prayer request processing (future use)
   - Implement least privilege policies for all roles
+- [ ] 1.1.5 Set up Terraform CI/CD pipeline for infrastructure provisioning
+  - Create GitHub Actions workflow for Terraform deployment
+  - Configure Terraform state management with S3 backend and native locking
+  - Set up OIDC authentication between GitHub Actions and AWS
+  - Create IAM roles and policies for GitHub Actions with least privilege
+  - Implement infrastructure validation and security scanning
+  - Set up environment-specific Terraform deployments (dev, staging, prod)
+  - Configure infrastructure drift detection and remediation
 
 ### 1.2 Set up AWS Cognito User Pool
 - [ ] 1.2.1 Configure Hosted UI with custom domain
@@ -222,7 +230,7 @@
 ## Testing Requirements
 
 ### Unit Tests
-- [ ] Test AWS infrastructure deployment and configuration
+- [ ] Test AWS infrastructure deployment and configuration with Terraform
 - [ ] Test Cognito authentication flow and JWT validation
 - [ ] Test DynamoDB table operations and data integrity
 - [ ] Test emotion classification accuracy with sample data
@@ -230,7 +238,7 @@
 - [ ] Test API endpoints with authentication and error handling
 
 ### Integration Tests
-- [ ] Test end-to-end infrastructure deployment
+- [ ] Test end-to-end infrastructure deployment with Terraform
 - [ ] Test Cognito integration with FastAPI authentication
 - [ ] Test Bedrock model access and response parsing
 - [ ] Test DynamoDB operations through VPC endpoints
@@ -243,7 +251,7 @@
 - [ ] Test content retrieval system with all emotion types
 
 ## Success Criteria
-- All AWS infrastructure deploys successfully via IaC
+- All AWS infrastructure deploys successfully via Terraform
 - Cognito authentication works end-to-end with JWT validation
 - DynamoDB tables support all required operations with proper indexing
 - Emotion classification achieves >80% accuracy on test dataset

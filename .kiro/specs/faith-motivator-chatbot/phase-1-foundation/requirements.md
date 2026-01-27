@@ -13,7 +13,12 @@ This phase establishes the foundational AWS infrastructure, backend API framewor
 - 1.2 VPC endpoints are configured for all required AWS services to avoid internet traffic
 - 1.3 Security groups implement least privilege access patterns
 - 1.4 IAM roles and policies follow principle of least privilege
-- 1.5 All infrastructure is defined as code (CDK/Terraform)
+- 1.5 All infrastructure is defined as code (Terraform)
+- 1.6 CI/CD pipeline automates infrastructure provisioning and validation
+- 1.7 Infrastructure changes require approval for production deployments
+- 1.8 Terraform state is managed securely with remote S3 backend and native locking
+- 1.9 GitHub Actions authenticates with AWS using OIDC (no long-lived credentials)
+- 1.10 IAM roles for CI/CD follow least privilege with repository-specific conditions
 
 ### 2. User Authentication System
 **As a user**, I want to securely authenticate to the platform so that my conversations are protected and personalized.
@@ -48,7 +53,7 @@ This phase establishes the foundational AWS infrastructure, backend API framewor
 **As the system**, I need access to Amazon Bedrock services so that I can classify emotions and generate appropriate responses.
 
 **Acceptance Criteria:**
-- 5.1 Required Bedrock models (Claude, Titan) are enabled and accessible
+- 5.1 Required Bedrock models (Claude) are enabled and accessible
 - 5.2 Bedrock Guardrails are configured for content filtering
 - 5.3 Model access policies restrict usage to authorized services only
 - 5.4 Bedrock integration supports both emotion classification and response generation

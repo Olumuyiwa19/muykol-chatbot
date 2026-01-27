@@ -10,17 +10,17 @@ Phase 1 establishes the foundational AWS infrastructure and core backend service
 ┌─────────────────────────────────────────────────────────────────┐
 │                        AWS Account                               │
 │  ┌─────────────────────────────────────────────────────────────┐ │
-│  │                    VPC (10.0.0.0/16)                       │ │
+│  │                    VPC (172.20.0.0/20)                     │ │
 │  │                                                             │ │
 │  │  ┌─────────────────┐    ┌─────────────────┐                │ │
 │  │  │  Public Subnet  │    │  Public Subnet  │                │ │
-│  │  │   (10.0.1.0/24) │    │   (10.0.2.0/24) │                │ │
+│  │  │  (172.20.1.0/24)│    │  (172.20.2.0/24)│                │ │
 │  │  │      AZ-a       │    │      AZ-b       │                │ │
 │  │  └─────────────────┘    └─────────────────┘                │ │
 │  │                                                             │ │
 │  │  ┌─────────────────┐    ┌─────────────────┐                │ │
 │  │  │ Private Subnet  │    │ Private Subnet  │                │ │
-│  │  │  (10.0.3.0/24)  │    │  (10.0.4.0/24)  │                │ │
+│  │  │ (172.20.3.0/24) │    │ (172.20.4.0/24) │                │ │
 │  │  │      AZ-a       │    │      AZ-b       │                │ │
 │  │  │                 │    │                 │                │ │
 │  │  │  ┌───────────┐  │    │  ┌───────────┐  │                │ │
@@ -54,173 +54,262 @@ Phase 1 establishes the foundational AWS infrastructure and core backend service
 
 ## Component Design
 
-### 1. AWS Infrastructure (CDK/Terraform)
+### 1. AWS Infrastructure (Terraform)
 
 #### VPC Configuration
-```python
+```hcl
 # VPC with multi-AZ setup
-vpc_config = {
-    "cidr_block": "10.0.0.0/16",
-    "availability_zones": ["us-east-1a", "us-east-1b"],
-    "public_subnets": ["10.0.1.0/24", "10.0.2.0/24"],
-    "private_subnets": ["10.0.3.0/24", "10.0.4.0/24"],
-    "enable_nat_gateway": False,  # Use VPC endpoints instead
-    "enable_vpn_gateway": False
+resource "aws_vpc" "faith_chatbot_vpc" {
+  cidr_block           = "172.20.0.0/20"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = {
+    Name = "faith-chatbot-vpc"
+  }
+}
+
+# Public subnets
+resource "aws_subnet" "public_subnets" {
+  count             = 2
+  vpc_id            = aws_vpc.faith_chatbot_vpc.id
+  cidr_block        = ["172.20.1.0/24", "172.20.2.0/24"][count.index]
+  availability_zone = ["us-east-1a", "us-east-1b"][count.index]
+  
+  map_public_ip_on_launch = true
+
+  tags = {
+    Name = "faith-chatbot-public-subnet-${count.index + 1}"
+  }
+}
+
+# Private subnets
+resource "aws_subnet" "private_subnets" {
+  count             = 2
+  vpc_id            = aws_vpc.faith_chatbot_vpc.id
+  cidr_block        = ["172.20.3.0/24", "172.20.4.0/24"][count.index]
+  availability_zone = ["us-east-1a", "us-east-1b"][count.index]
+
+  tags = {
+    Name = "faith-chatbot-private-subnet-${count.index + 1}"
+  }
 }
 ```
 
 #### Security Groups
-```python
+```hcl
 # ECS Task Security Group (for future use)
-ecs_security_group = {
-    "name": "faith-chatbot-ecs-sg",
-    "description": "Security group for ECS tasks",
-    "ingress_rules": [
-        {
-            "from_port": 8000,
-            "to_port": 8000,
-            "protocol": "tcp",
-            "source_security_group_id": "alb-sg"  # Only from ALB
-        }
-    ],
-    "egress_rules": [
-        {
-            "from_port": 443,
-            "to_port": 443,
-            "protocol": "tcp",
-            "cidr_blocks": ["0.0.0.0/0"]  # HTTPS to VPC endpoints
-        }
-    ]
+resource "aws_security_group" "ecs_tasks" {
+  name        = "faith-chatbot-ecs-sg"
+  description = "Security group for ECS tasks"
+  vpc_id      = aws_vpc.faith_chatbot_vpc.id
+
+  ingress {
+    from_port       = 8000
+    to_port         = 8000
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+    description     = "HTTP from ALB only"
+  }
+
+  egress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS to VPC endpoints"
+  }
+
+  tags = {
+    Name = "faith-chatbot-ecs-sg"
+  }
 }
 
 # VPC Endpoint Security Group
-vpc_endpoint_sg = {
-    "name": "faith-chatbot-vpce-sg",
-    "description": "Security group for VPC endpoints",
-    "ingress_rules": [
-        {
-            "from_port": 443,
-            "to_port": 443,
-            "protocol": "tcp",
-            "source_security_group_id": "ecs-sg"
-        }
-    ]
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "faith-chatbot-vpce-sg"
+  description = "Security group for VPC endpoints"
+  vpc_id      = aws_vpc.faith_chatbot_vpc.id
+
+  ingress {
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs_tasks.id]
+    description     = "HTTPS from ECS tasks"
+  }
+
+  tags = {
+    Name = "faith-chatbot-vpce-sg"
+  }
 }
 ```
 
 #### VPC Endpoints
-```python
-vpc_endpoints = [
-    {
-        "service": "com.amazonaws.us-east-1.bedrock-runtime",
-        "type": "Interface",
-        "policy": {
-            "Version": "2012-10-17",
-            "Statement": [{
-                "Effect": "Allow",
-                "Principal": "*",
-                "Action": [
-                    "bedrock:InvokeModel",
-                    "bedrock:InvokeModelWithResponseStream"
-                ],
-                "Resource": "*",
-                "Condition": {
-                    "StringEquals": {
-                        "aws:PrincipalArn": "arn:aws:iam::ACCOUNT:role/FaithChatbotTaskRole"
-                    }
-                }
-            }]
+```hcl
+# Bedrock Runtime VPC Endpoint
+resource "aws_vpc_endpoint" "bedrock_runtime" {
+  vpc_id              = aws_vpc.faith_chatbot_vpc.id
+  service_name        = "com.amazonaws.us-east-1.bedrock-runtime"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private_subnets[*].id
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = "*"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream"
+        ]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "aws:PrincipalArn" = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/FaithChatbotTaskRole"
+          }
         }
-    },
-    {
-        "service": "com.amazonaws.us-east-1.dynamodb",
-        "type": "Gateway",
-        "policy": {
-            "Version": "2012-10-17",
-            "Statement": [{
-                "Effect": "Allow",
-                "Principal": "*",
-                "Action": [
-                    "dynamodb:GetItem",
-                    "dynamodb:PutItem",
-                    "dynamodb:UpdateItem",
-                    "dynamodb:Query",
-                    "dynamodb:Scan"
-                ],
-                "Resource": "arn:aws:dynamodb:us-east-1:ACCOUNT:table/FaithChatbot-*"
-            }]
-        }
-    }
-]
+      }
+    ]
+  })
+
+  tags = {
+    Name = "faith-chatbot-bedrock-runtime-endpoint"
+  }
+}
+
+# DynamoDB VPC Endpoint
+resource "aws_vpc_endpoint" "dynamodb" {
+  vpc_id            = aws_vpc.faith_chatbot_vpc.id
+  service_name      = "com.amazonaws.us-east-1.dynamodb"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = aws_route_table.private[*].id
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = "*"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:UpdateItem",
+          "dynamodb:Query",
+          "dynamodb:Scan"
+        ]
+        Resource = "arn:aws:dynamodb:us-east-1:${data.aws_caller_identity.current.account_id}:table/FaithChatbot-*"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "faith-chatbot-dynamodb-endpoint"
+  }
+}
 ```
 
 ### 2. AWS Cognito Configuration
 
 #### User Pool Setup
-```python
-cognito_user_pool = {
-    "pool_name": "FaithChatbotUsers",
-    "alias_attributes": ["email"],
-    "auto_verified_attributes": ["email"],
-    "password_policy": {
-        "minimum_length": 8,
-        "require_uppercase": True,
-        "require_lowercase": True,
-        "require_numbers": True,
-        "require_symbols": False
-    },
-    "mfa_configuration": "OPTIONAL",
-    "account_recovery_setting": {
-        "recovery_mechanisms": [
-            {"name": "verified_email", "priority": 1}
-        ]
+```hcl
+# Cognito User Pool
+resource "aws_cognito_user_pool" "faith_chatbot_users" {
+  name = "FaithChatbotUsers"
+  
+  alias_attributes = ["email"]
+  auto_verified_attributes = ["email"]
+  
+  password_policy {
+    minimum_length    = 8
+    require_uppercase = true
+    require_lowercase = true
+    require_numbers   = true
+    require_symbols   = false
+  }
+  
+  mfa_configuration = "OPTIONAL"
+  
+  account_recovery_setting {
+    recovery_mechanism {
+      name     = "verified_email"
+      priority = 1
     }
+  }
+
+  tags = {
+    Name = "faith-chatbot-user-pool"
+  }
 }
 
 # User Pool Client for web application
-user_pool_client = {
-    "client_name": "FaithChatbotWebClient",
-    "user_pool_id": "user_pool_id",
-    "generate_secret": False,  # Public client for web
-    "auth_flows": ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"],
-    "oauth_flows": ["code"],
-    "oauth_scopes": ["openid", "email", "profile"],
-    "callback_urls": ["https://app.faithchatbot.com/auth/callback"],
-    "logout_urls": ["https://app.faithchatbot.com/auth/logout"],
-    "supported_identity_providers": ["COGNITO"]
+resource "aws_cognito_user_pool_client" "web_client" {
+  name         = "FaithChatbotWebClient"
+  user_pool_id = aws_cognito_user_pool.faith_chatbot_users.id
+  
+  generate_secret = false  # Public client for web
+  
+  explicit_auth_flows = [
+    "ALLOW_USER_SRP_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH"
+  ]
+  
+  supported_identity_providers = ["COGNITO"]
+  
+  allowed_oauth_flows = ["code"]
+  allowed_oauth_scopes = ["openid", "email", "profile"]
+  
+  callback_urls = ["https://app.faithchatbot.com/auth/callback"]
+  logout_urls   = ["https://app.faithchatbot.com/auth/logout"]
 }
 
 # Hosted UI Domain
-hosted_ui_domain = {
-    "domain": "auth.faithchatbot.com",
-    "certificate_arn": "arn:aws:acm:us-east-1:ACCOUNT:certificate/CERT_ID"
+resource "aws_cognito_user_pool_domain" "hosted_ui" {
+  domain          = "auth.faithchatbot.com"
+  certificate_arn = var.acm_certificate_arn
+  user_pool_id    = aws_cognito_user_pool.faith_chatbot_users.id
 }
 ```
 
 ### 3. DynamoDB Table Design
 
 #### UserProfile Table
-```python
-user_profile_table = {
-    "table_name": "FaithChatbot-UserProfiles",
-    "billing_mode": "ON_DEMAND",
-    "hash_key": "user_id",
-    "attributes": [
-        {"name": "user_id", "type": "S"},
-        {"name": "email", "type": "S"}
-    ],
-    "global_secondary_indexes": [
-        {
-            "index_name": "EmailIndex",
-            "hash_key": "email",
-            "projection_type": "ALL"
-        }
-    ],
-    "point_in_time_recovery": True,
-    "server_side_encryption": {
-        "enabled": True,
-        "kms_key_id": "alias/aws/dynamodb"
-    }
+```hcl
+resource "aws_dynamodb_table" "user_profiles" {
+  name           = "FaithChatbot-UserProfiles"
+  billing_mode   = "ON_DEMAND"
+  hash_key       = "user_id"
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "email"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name     = "EmailIndex"
+    hash_key = "email"
+    projection_type = "ALL"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_id  = "alias/aws/dynamodb"
+  }
+
+  tags = {
+    Name = "faith-chatbot-user-profiles"
+  }
 }
 
 # Sample record structure
@@ -245,24 +334,45 @@ user_profile_record = {
 ```
 
 #### ConversationSession Table
-```python
-conversation_session_table = {
-    "table_name": "FaithChatbot-ConversationSessions",
-    "billing_mode": "ON_DEMAND",
-    "hash_key": "session_id",
-    "attributes": [
-        {"name": "session_id", "type": "S"},
-        {"name": "user_id", "type": "S"}
-    ],
-    "global_secondary_indexes": [
-        {
-            "index_name": "UserIndex",
-            "hash_key": "user_id",
-            "projection_type": "ALL"
-        }
-    ],
-    "ttl_attribute": "ttl",  # Auto-cleanup after 30 days
-    "point_in_time_recovery": True
+```hcl
+resource "aws_dynamodb_table" "conversation_sessions" {
+  name           = "FaithChatbot-ConversationSessions"
+  billing_mode   = "ON_DEMAND"
+  hash_key       = "session_id"
+
+  attribute {
+    name = "session_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name     = "UserIndex"
+    hash_key = "user_id"
+    projection_type = "ALL"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_id  = "alias/aws/dynamodb"
+  }
+
+  tags = {
+    Name = "faith-chatbot-conversation-sessions"
+  }
 }
 
 # Sample record structure
@@ -299,28 +409,51 @@ conversation_record = {
 ```
 
 #### PrayerRequest Table
-```python
-prayer_request_table = {
-    "table_name": "FaithChatbot-PrayerRequests",
-    "billing_mode": "ON_DEMAND",
-    "hash_key": "request_id",
-    "attributes": [
-        {"name": "request_id", "type": "S"},
-        {"name": "user_id", "type": "S"},
-        {"name": "status", "type": "S"}
-    ],
-    "global_secondary_indexes": [
-        {
-            "index_name": "UserIndex",
-            "hash_key": "user_id",
-            "projection_type": "ALL"
-        },
-        {
-            "index_name": "StatusIndex",
-            "hash_key": "status",
-            "projection_type": "ALL"
-        }
-    ]
+```hcl
+resource "aws_dynamodb_table" "prayer_requests" {
+  name           = "FaithChatbot-PrayerRequests"
+  billing_mode   = "ON_DEMAND"
+  hash_key       = "request_id"
+
+  attribute {
+    name = "request_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "status"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name     = "UserIndex"
+    hash_key = "user_id"
+    projection_type = "ALL"
+  }
+
+  global_secondary_index {
+    name     = "StatusIndex"
+    hash_key = "status"
+    projection_type = "ALL"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_id  = "alias/aws/dynamodb"
+  }
+
+  tags = {
+    Name = "faith-chatbot-prayer-requests"
+  }
 }
 
 # Sample record structure
@@ -337,22 +470,40 @@ prayer_request_record = {
 ```
 
 #### ConsentLog Table
-```python
-consent_log_table = {
-    "table_name": "FaithChatbot-ConsentLogs",
-    "billing_mode": "ON_DEMAND",
-    "hash_key": "log_id",
-    "attributes": [
-        {"name": "log_id", "type": "S"},
-        {"name": "user_id", "type": "S"}
-    ],
-    "global_secondary_indexes": [
-        {
-            "index_name": "UserIndex",
-            "hash_key": "user_id",
-            "projection_type": "ALL"
-        }
-    ]
+```hcl
+resource "aws_dynamodb_table" "consent_logs" {
+  name           = "FaithChatbot-ConsentLogs"
+  billing_mode   = "ON_DEMAND"
+  hash_key       = "log_id"
+
+  attribute {
+    name = "log_id"
+    type = "S"
+  }
+
+  attribute {
+    name = "user_id"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name     = "UserIndex"
+    hash_key = "user_id"
+    projection_type = "ALL"
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_id  = "alias/aws/dynamodb"
+  }
+
+  tags = {
+    Name = "faith-chatbot-consent-logs"
+  }
 }
 
 # Sample record structure
@@ -371,23 +522,34 @@ consent_log_record = {
 ### 4. SQS Configuration
 
 #### Prayer Request Queue
-```python
-prayer_request_queue = {
-    "queue_name": "FaithChatbot-PrayerRequests",
-    "visibility_timeout_seconds": 300,
-    "message_retention_period": 1209600,  # 14 days
-    "receive_message_wait_time_seconds": 20,  # Long polling
-    "redrive_policy": {
-        "dead_letter_target_arn": "arn:aws:sqs:us-east-1:ACCOUNT:FaithChatbot-PrayerRequests-DLQ",
-        "max_receive_count": 3
-    },
-    "kms_master_key_id": "alias/aws/sqs"
+```hcl
+# Prayer Request Queue
+resource "aws_sqs_queue" "prayer_requests" {
+  name                       = "FaithChatbot-PrayerRequests"
+  visibility_timeout_seconds = 300
+  message_retention_seconds  = 1209600  # 14 days
+  receive_wait_time_seconds  = 20       # Long polling
+  
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.prayer_requests_dlq.arn
+    maxReceiveCount     = 3
+  })
+
+  kms_master_key_id = "alias/aws/sqs"
+
+  tags = {
+    Name = "faith-chatbot-prayer-requests"
+  }
 }
 
 # Dead Letter Queue
-prayer_request_dlq = {
-    "queue_name": "FaithChatbot-PrayerRequests-DLQ",
-    "message_retention_period": 1209600  # 14 days
+resource "aws_sqs_queue" "prayer_requests_dlq" {
+  name                      = "FaithChatbot-PrayerRequests-DLQ"
+  message_retention_seconds = 1209600  # 14 days
+
+  tags = {
+    Name = "faith-chatbot-prayer-requests-dlq"
+  }
 }
 
 # Sample message structure
@@ -747,24 +909,165 @@ class TestEmotionClassification:
 ## Deployment Strategy
 
 ### Infrastructure as Code
-- Use AWS CDK (Python) for infrastructure definition
-- Environment-specific parameter files
+- Use Terraform for infrastructure definition
+- Environment-specific variable files
 - Automated deployment via GitHub Actions
-- State management with CDK/CloudFormation
+- State management with Terraform Cloud or S3 backend
+
+### Terraform CI/CD Pipeline
+```yaml
+# .github/workflows/terraform.yml
+name: Terraform Infrastructure Deployment
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['infrastructure/**']
+  pull_request:
+    branches: [main]
+    paths: ['infrastructure/**']
+
+env:
+  TF_VERSION: '1.6.0'
+  AWS_REGION: us-east-1
+
+# Required for OIDC authentication
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+jobs:
+  terraform-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: infrastructure
+      
+      - name: Terraform Init
+        run: terraform init -backend=false
+        working-directory: infrastructure
+      
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: infrastructure
+      
+      - name: Run tfsec security scan
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: infrastructure
+
+  terraform-plan:
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-Infrastructure-Role
+          role-session-name: GitHubActions-TerraformPlan
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Terraform Init
+        run: terraform init
+        working-directory: infrastructure
+      
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -var-file="environments/${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}.tfvars" -out=tfplan -no-color
+          terraform show -no-color tfplan > tfplan.txt
+        working-directory: infrastructure
+      
+      - name: Comment PR with plan
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('infrastructure/tfplan.txt', 'utf8');
+            const maxLength = 65000; // GitHub comment limit
+            const truncatedPlan = plan.length > maxLength ? 
+              plan.substring(0, maxLength) + '\n\n... (truncated)' : plan;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan\n\`\`\`hcl\n${truncatedPlan}\n\`\`\``
+            });
+
+  terraform-apply:
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActions-Infrastructure-Role
+          role-session-name: GitHubActions-TerraformApply
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+      
+      - name: Terraform Init
+        run: terraform init
+        working-directory: infrastructure
+      
+      - name: Terraform Apply
+        run: terraform apply -var-file="environments/${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}.tfvars" -auto-approve
+        working-directory: infrastructure
+      
+      - name: Output infrastructure details
+        run: |
+          echo "## Infrastructure Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}" >> $GITHUB_STEP_SUMMARY
+          terraform output -json > infrastructure_outputs.json
+          echo "### Key Outputs:" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat infrastructure_outputs.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        working-directory: infrastructure
+```
 
 ### Environment Configuration
-```yaml
-# environments/dev.yaml
-environment: development
-vpc_cidr: "10.0.0.0/16"
-cognito_domain: "auth-dev.faithchatbot.com"
-log_level: "DEBUG"
+```hcl
+# environments/dev.tfvars
+environment      = "development"
+vpc_cidr        = "172.20.0.0/20"
+cognito_domain  = "auth-dev.faithchatbot.com"
+log_level       = "DEBUG"
 
-# environments/prod.yaml
-environment: production
-vpc_cidr: "10.1.0.0/16"
-cognito_domain: "auth.faithchatbot.com"
-log_level: "INFO"
+# environments/prod.tfvars
+environment      = "production"
+vpc_cidr        = "172.21.0.0/20"
+cognito_domain  = "auth.faithchatbot.com"
+log_level       = "INFO"
 ```
 
 This foundation phase establishes the secure, scalable infrastructure needed to support the entire faith-based motivator chatbot system, with proper authentication, data storage, and AI/ML capabilities.

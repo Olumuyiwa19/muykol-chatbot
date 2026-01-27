@@ -16,16 +16,25 @@ This phase implements production deployment, operational procedures, and launch 
 - 1.5 Blue-green deployment strategy enables safe production updates
 - 1.6 Rollback procedures can quickly revert problematic deployments
 
-### 2. Continuous Integration and Deployment
-**As a developer**, I want automated CI/CD pipelines so that code changes can be safely and efficiently deployed to production.
+### 2. Continuous Integration and Deployment Pipeline Architecture
+**As a developer**, I want automated CI/CD pipelines with separate infrastructure and application workflows so that code changes can be safely and efficiently deployed to production.
 
 **Acceptance Criteria:**
-- 2.1 GitHub Actions workflow runs all tests on every commit
-- 2.2 Docker images are built and pushed to ECR automatically
-- 2.3 Deployment pipeline includes quality gates and approval processes
-- 2.4 Automated deployment to staging environment for validation
-- 2.5 Production deployment requires manual approval after staging validation
-- 2.6 Deployment status and rollback capabilities are clearly visible
+- 2.1 Feature branch CI validates infrastructure changes with Terraform plan (no apply)
+- 2.2 Feature branch CI validates application changes with comprehensive testing and CodeQL analysis
+- 2.3 Infrastructure CI pipeline uses Checkov for security scanning and compliance validation
+- 2.4 Application CI pipeline uses CodeQL for security analysis and vulnerability detection
+- 2.5 PR comments provide detailed feedback on infrastructure plans and security findings
+- 2.6 Main branch CD deploys infrastructure changes through automated Terraform apply
+- 2.7 Main branch CD deploys application changes through ECS service updates
+- 2.8 Infrastructure and application deployments are coordinated to prevent conflicts
+- 2.9 Infrastructure drift detection runs automatically and alerts on changes
+- 2.10 Terraform state management uses S3 native locking and backup procedures
+- 2.11 All AWS authentication uses OIDC with short-lived tokens
+- 2.12 CI/CD roles have repository-specific trust policies and least privilege permissions
+- 2.13 Deployment strategies include rolling, blue-green, and canary options
+- 2.14 Automated rollback capabilities are available for failed deployments
+- 2.15 Post-deployment validation ensures system health and performance
 
 ### 3. Performance Optimization and Monitoring
 **As a system administrator**, I want optimized performance and comprehensive monitoring so that the system operates efficiently and issues are detected quickly.
@@ -81,38 +90,114 @@ This phase implements production deployment, operational procedures, and launch 
 - **Logging**: Centralized logging to CloudWatch Logs
 - **Monitoring**: CloudWatch metrics and custom dashboards
 
-### CI/CD Pipeline Components
+### CI/CD Pipeline Architecture
 ```yaml
-# GitHub Actions Workflow
-name: Deploy Faith Motivator Chatbot
+# Infrastructure CI Pipeline (Feature Branches)
+name: Infrastructure CI - Validation
 on:
-  push:
-    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
+    paths: ['infrastructure/**']
 
 jobs:
-  test:
-    - Unit tests
-    - Integration tests
-    - Security scans
-    - Performance tests
+  terraform-validate:
+    - Terraform format check
+    - Terraform validation
+    - Terraform init and plan (no apply)
   
-  build:
+  security-scan:
+    - Checkov infrastructure security scan
+    - SARIF results upload to GitHub Security
+    - PR comments with security findings
+  
+  terraform-plan:
+    - Generate Terraform plan
+    - Comment PR with plan summary
+    - Validate infrastructure changes
+
+# Application CI Pipeline (Feature Branches)
+name: Application CI - Validation
+on:
+  pull_request:
+    branches: [main, develop]
+    paths: ['app/**', 'tests/**', 'requirements*.txt', 'Dockerfile']
+
+jobs:
+  code-quality:
+    - Python code formatting and linting
+    - CodeQL security analysis
+    - Bandit security scanning
+    - Dependency vulnerability scanning
+  
+  unit-tests:
+    - Unit test execution with coverage
+    - Test result reporting
+    - Coverage validation (>80%)
+  
+  integration-tests:
+    - Integration tests with LocalStack
+    - Service interaction validation
+  
+  docker-build:
     - Docker image build
-    - Image security scanning
-    - Push to ECR
+    - Trivy vulnerability scanning
+    - Security findings reporting
+
+# Infrastructure CD Pipeline (Main Branch)
+name: Infrastructure CD - Deployment
+on:
+  push:
+    branches: [main]
+    paths: ['infrastructure/**']
+
+jobs:
+  deploy-infrastructure:
+    - Terraform plan and apply
+    - State backup and drift detection
+    - Infrastructure validation
+    - Failure notifications
+
+# Application CD Pipeline (Main Branch)
+name: Application CD - Deployment
+on:
+  push:
+    branches: [main]
+    paths: ['app/**', 'tests/**', 'requirements*.txt', 'Dockerfile']
+
+jobs:
+  build-and-push:
+    - Docker image build and push to ECR
+    - Final security scanning
   
   deploy-staging:
     - Deploy to staging environment
-    - Run smoke tests
-    - Performance validation
+    - Smoke tests and validation
   
   deploy-production:
-    - Manual approval required
-    - Blue-green deployment
-    - Health check validation
+    - Deploy to production with selected strategy
+    - Health checks and validation
     - Rollback capability
+
+# Coordinated CI/CD Pipeline
+name: Coordinated CI/CD Pipeline
+on:
+  push:
+    branches: [main]
+
+jobs:
+  detect-changes:
+    - Detect infrastructure vs application changes
+  
+  deploy-infrastructure:
+    - Deploy infrastructure if changes detected
+  
+  deploy-application:
+    - Deploy application if changes detected
+  
+  post-deployment-validation:
+    - Comprehensive system validation
+    - Performance baseline checks
+    - End-to-end testing
 ```
 
 ### Performance Optimization Strategy
