@@ -8,7 +8,7 @@ Phase 2 builds the core chat functionality on the foundation established in Phas
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Frontend (React/Next.js)                     │
+│                    Frontend (Reflex/Python)                     │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
 │  │  Chat Interface │ │ Auth Components │ │ Prayer Connect  │   │
 │  │                 │ │                 │ │     Modal       │   │

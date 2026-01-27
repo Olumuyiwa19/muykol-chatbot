@@ -67,9 +67,9 @@
 
 ## 5. Frontend Development
 
-### 5.1 Create React/Next.js application
-- [ ] 5.1.1 Set up Next.js project with TypeScript
-  - Initialize Next.js project with TypeScript configuration
+### 5.1 Create Reflex application
+- [ ] 5.1.1 Set up Reflex project with Python 3.9+
+  - Initialize Reflex project with Python configuration
   - Configure ESLint and Prettier for code quality
   - Set up project structure with components, hooks, services, types
   - Configure environment variables for API endpoints

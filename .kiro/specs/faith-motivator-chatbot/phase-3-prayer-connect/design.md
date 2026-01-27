@@ -8,7 +8,7 @@ Phase 3 implements the prayer connect system that enables users to request praye
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Frontend (React/Next.js)                     │
+│                    Frontend (Reflex/Python)                     │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
 │  │ Prayer Connect  │ │ Consent Modal   │ │ Request Status  │   │
 │  │    Button       │ │                 │ │    Tracking     │   │

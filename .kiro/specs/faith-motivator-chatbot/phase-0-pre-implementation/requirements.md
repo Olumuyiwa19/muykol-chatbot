@@ -6,15 +6,15 @@ This phase establishes the foundational specifications, development environment,
 ## User Stories
 
 ### 1. Frontend Architecture Foundation
-**As a frontend developer**, I want a comprehensive React/Next.js architecture specification so that I can build a consistent, accessible, and maintainable user interface.
+**As a frontend developer**, I want a comprehensive Reflex architecture specification so that I can build a consistent, accessible, and maintainable user interface using Python.
 
 **Acceptance Criteria:**
-- 1.1 Component architecture follows React best practices and design patterns
+- 1.1 Component architecture follows Reflex best practices and design patterns
 - 1.2 UI/UX wireframes define all user interaction flows
 - 1.3 Accessibility requirements meet WCAG 2.1 AA standards
 - 1.4 Mobile-first responsive design supports all device sizes
-- 1.5 Design system provides consistent styling and components
-- 1.6 State management strategy handles complex application state
+- 1.5 Design system provides consistent styling with Reflex components
+- 1.6 State management strategy uses Reflex State classes
 - 1.7 Performance optimization strategies are defined and documented
 
 ### 2. Environment Configuration Management
@@ -45,7 +45,7 @@ This phase establishes the foundational specifications, development environment,
 - **Component Library**: Reusable UI components with consistent styling
 - **Layout System**: Responsive grid and layout components
 - **State Management**: Redux Toolkit or Zustand for application state
-- **Routing**: Next.js App Router with protected routes
+- **Routing**: Reflex routing with protected pages
 - **Authentication**: Cognito integration with session management
 - **API Integration**: Type-safe API client with error handling
 - **Testing Framework**: Jest and React Testing Library setup

@@ -2,13 +2,13 @@
 
 ## 1. Frontend Architecture Setup
 
-### 1.1 Create React/Next.js Component Architecture
-- [ ] 1.1.1 Initialize Next.js 14 project with TypeScript
-  - Set up Next.js project with App Router
-  - Configure TypeScript with strict mode
-  - Set up ESLint and Prettier configurations
-  - Configure Tailwind CSS with custom design tokens
-  - Set up Headless UI component library
+### 1.1 Create Reflex Component Architecture
+- [ ] 1.1.1 Initialize Reflex project with Python 3.9+
+  - Set up Reflex project with proper structure
+  - Configure Python virtual environment
+  - Set up black and flake8 configurations
+  - Configure Reflex styling system
+  - Set up component library structure
 - [ ] 1.1.2 Implement base UI component library
   - Create Button component with variants and accessibility
   - Create Input, TextArea, and form components
@@ -21,7 +21,7 @@
   - Create chat store for conversation management
   - Create UI store for modal and notification state
   - Implement store persistence for auth state
-  - Add TypeScript types for all store interfaces
+  - Add Python type hints for all state interfaces
 - [ ] 1.1.4 Configure routing and authentication
   - Set up protected route middleware
   - Create authentication pages (login, callback)
