@@ -1,4 +1,18 @@
 # =============================================================================
+# KIRO AI ASSISTANT FILES
+# =============================================================================
+
+# Kiro configuration and specs (contains sensitive project information)
+.kiro/
+.kiro/*
+
+# Kiro steering files (development standards and patterns)
+.kiro/steering/
+
+# Kiro specs (project requirements and architecture)
+.kiro/specs/
+
+# =============================================================================
 # TERRAFORM FILES
 # =============================================================================
 
