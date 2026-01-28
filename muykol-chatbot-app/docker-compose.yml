@@ -1,0 +1,161 @@
+version: '3.8'
+
+services:
+  # Frontend Development Server (Reflex)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.reflex
+    environment:
+      - APP_ENVIRONMENT=development
+      - APP_URL=http://localhost:3000
+      - API_BASE_URL=http://localhost:8000
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - backend
+      - redis
+      - localstack
+    networks:
+      - faith-chatbot-network
+    restart: unless-stopped
+
+  # Backend API Service (FastAPI)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend.dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - APP_ENVIRONMENT=development
+      - APP_URL=http://localhost:3000
+      - API_BASE_URL=http://localhost:8000
+      - APP_SECRET_KEY=dev-secret-key-change-in-production-32chars
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT_URL=http://localstack:4566
+      - AWS_LOCALSTACK_ENDPOINT=http://localstack:4566
+      - AWS_COGNITO_USER_POOL_ID=us-east-1_dev123
+      - AWS_COGNITO_CLIENT_ID=dev-client-id
+      - AWS_COGNITO_DOMAIN=auth-dev.faithchatbot.local
+      - AWS_PRAYER_REQUESTS_QUEUE_URL=http://localstack:4566/000000000000/FaithChatbot-PrayerRequests
+      - AWS_PRAYER_REQUESTS_DLQ_URL=http://localstack:4566/000000000000/FaithChatbot-PrayerRequests-DLQ
+      - AWS_SES_SENDER_EMAIL=noreply@faithchatbot.local
+      - REDIS_URL=redis://redis:6379
+      - DB_DYNAMODB_ENDPOINT_URL=http://localstack:4566
+    depends_on:
+      - redis
+      - localstack
+    networks:
+      - faith-chatbot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # LocalStack for AWS Services
+  localstack:
+    image: localstack/localstack:3.0
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=dynamodb,sqs,ses,secretsmanager,cognito-idp
+      - DEBUG=0
+      - DATA_DIR=/tmp/localstack/data
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - LOCALSTACK_HOST=localstack
+      - PERSISTENCE=1
+      - SKIP_INFRA_DOWNLOADS=1
+      - DISABLE_CORS_CHECKS=1
+    volumes:
+      - "./localstack:/etc/localstack/init/ready.d"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "localstack-data:/tmp/localstack/data"
+    networks:
+      - faith-chatbot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis for Caching and Rate Limiting
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - faith-chatbot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL for Local Development (Optional)
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=faithchatbot_dev
+      - POSTGRES_USER=dev
+      - POSTGRES_PASSWORD=devpass
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    networks:
+      - faith-chatbot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d faithchatbot_dev"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx for Local Development (Optional)
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - faith-chatbot-network
+    restart: unless-stopped
+    profiles:
+      - with-nginx
+
+volumes:
+  localstack-data:
+    driver: local
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  faith-chatbot-network:
+    driver: bridge

@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Simplified LocalStack for AWS Services
+  localstack:
+    image: localstack/localstack:3.0
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=dynamodb,sqs,ses,secretsmanager,cognito-idp
+      - DEBUG=0
+      - LOCALSTACK_HOST=localstack
+      - PERSISTENCE=0
+      - SKIP_INFRA_DOWNLOADS=1
+      - DISABLE_CORS_CHECKS=1
+      - EAGER_SERVICE_LOADING=1
+    volumes:
+      - "./localstack:/etc/localstack/init/ready.d"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - faith-chatbot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # Redis for Caching and Rate Limiting
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - faith-chatbot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  faith-chatbot-network:
+    driver: bridge
