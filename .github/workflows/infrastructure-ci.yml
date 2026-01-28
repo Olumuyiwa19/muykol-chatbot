@@ -5,10 +5,10 @@ name: Infrastructure CI/CD
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, feature/**]
     paths: ['muykol-chatbot-infra/**']
   pull_request:
-    branches: [main, develop]
+    branches: [main, feature/**]
     paths: ['muykol-chatbot-infra/**']
 
 permissions:
