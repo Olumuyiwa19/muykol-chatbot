@@ -31,7 +31,7 @@ print_header() {
 
 # Configuration - Update these values for your setup
 PROJECT_NAME="muykol-chatbot"
-GITHUB_REPO="olumuyiwa19/muykol-chatbot"
+GITHUB_REPO="Olumuyiwa19/muykol-chatbot"
 OIDC_PROVIDER_URL="https://token.actions.githubusercontent.com"
 TERRAFORM_STATE_BUCKET="muykol-chatbot-terraform-state"  # Update if different
 
@@ -45,7 +45,7 @@ echo
 # Validate configuration
 if [[ "$GITHUB_REPO" == "olumuyiwa19/muykol-chatbot" ]]; then
     print_error "Please update GITHUB_REPO variable with your actual GitHub username!"
-    echo "Edit this script and change: GITHUB_REPO=\"olumuyiwa19/muykol-chatbot\""
+    echo "Edit this script and change: GITHUB_REPO=\"Olumuyiwa19/muykol-chatbot\""
     exit 1
 fi
 
