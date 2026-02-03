@@ -46,15 +46,6 @@ resource "aws_security_group_rule" "alb_to_ecs" {
   description              = "ALB to ECS tasks on port 8000"
 }
 
-  tags = {
-    Name = "${var.project_name}-alb-sg"
-  }
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
 # ECS Tasks Security Group
 resource "aws_security_group" "ecs_tasks" {
   name_prefix = "${var.project_name}-ecs-tasks-"

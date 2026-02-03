@@ -67,7 +67,8 @@ module "cognito" {
 module "dynamodb" {
   source = "./modules/dynamodb"
 
-  project_name = var.project_name
+  project_name      = var.project_name
+  ecs_task_role_arn = module.iam.ecs_task_role_arn
 }
 
 # SQS Module
