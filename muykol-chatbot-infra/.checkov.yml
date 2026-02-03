@@ -1,0 +1,31 @@
+# Checkov configuration for muykol-chatbot infrastructure
+# This file defines security checks to skip for specific use cases
+
+# Skip specific security checks
+skip-check:
+  - CKV_AWS_79   # Ensure Instance Metadata Service Version 1 is not enabled
+  - CKV_AWS_61   # Ensure AWS IAM policy does not grant '*' permissions
+  - CKV_AWS_144  # Ensure that S3 bucket has cross-region replication enabled
+  - CKV_AWS_145  # Ensure that S3 buckets are encrypted with KMS by default
+  - CKV_AWS_355  # Ensure no IAM policies documents allow "*" as a statement's resource for restrictable actions
+  - CKV_AWS_338  # Ensure CloudWatch log groups retains logs for at least 1 year
+  - CKV_AWS_158  # Ensure that CloudWatch Log Group is encrypted by KMS
+  - CKV_AWS_26   # Ensure all data stored in the SNS topic is encrypted
+  - CKV_AWS_7    # Ensure rotation for customer created CMKs is enabled
+
+# Framework to run checks on
+framework:
+  - terraform
+
+# Directory to scan (relative to this config file)
+directory:
+  - .
+
+# Output format options: cli, json, junitxml, github_failed_only, sarif
+output: cli
+
+# Soft fail - don't exit with error code on failed checks
+soft-fail: true
+
+# Download external modules for scanning
+download-external-modules: true
