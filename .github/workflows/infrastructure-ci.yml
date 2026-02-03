@@ -106,7 +106,7 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -var-file="terraform.dev.tfvars" -no-color -out=tfplan || echo "Plan failed - this is expected without AWS credentials"
+          terraform plan -var-file="dev.tfvars" -no-color -out=tfplan || echo "Plan failed - this is expected without AWS credentials"
         working-directory: muykol-chatbot-infra
         continue-on-error: true
 
