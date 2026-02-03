@@ -49,9 +49,7 @@ module "vpc" {
 module "iam" {
   source = "./modules/iam"
 
-  project_name           = var.project_name
-  github_repository      = var.github_repository
-  terraform_state_bucket = var.terraform_state_bucket
+  project_name = var.project_name
 }
 
 # Cognito Module

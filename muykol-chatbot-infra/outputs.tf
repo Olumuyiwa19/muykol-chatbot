@@ -35,16 +35,6 @@ output "ecs_task_role_arn" {
   value       = module.iam.ecs_task_role_arn
 }
 
-output "github_actions_infrastructure_role_arn" {
-  description = "ARN of the GitHub Actions infrastructure role"
-  value       = module.iam.github_actions_infrastructure_role_arn
-}
-
-output "github_actions_deployment_role_arn" {
-  description = "ARN of the GitHub Actions deployment role"
-  value       = module.iam.github_actions_deployment_role_arn
-}
-
 # Cognito Outputs
 output "cognito_user_pool_id" {
   description = "ID of the Cognito User Pool"

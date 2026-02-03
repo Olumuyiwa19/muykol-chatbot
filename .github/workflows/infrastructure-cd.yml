@@ -45,7 +45,7 @@ jobs:
       
       - name: Terraform Plan
         working-directory: muykol-chatbot-infra
-        run: terraform plan -var-file="terraform.${{ matrix.environment }}.tfvars"
+        run: terraform plan -var-file="${{ matrix.environment }}.tfvars"
 
   terraform-apply-dev:
     name: Deploy to Development
@@ -71,7 +71,7 @@ jobs:
       
       - name: Terraform Apply Dev
         working-directory: muykol-chatbot-infra
-        run: terraform apply -auto-approve -var-file="terraform.dev.tfvars"
+        run: terraform apply -auto-approve -var-file="dev.tfvars"
 
   # terraform-apply-staging:
   #   name: Deploy to Staging
