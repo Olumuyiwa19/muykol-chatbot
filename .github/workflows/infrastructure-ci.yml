@@ -1,14 +1,14 @@
 # Infrastructure CI/CD Pipeline for Faith Motivator Chatbot
 # Handles Terraform validation, security scanning, and deployment
 
-name: Infrastructure CI/CD
+name: Infrastructure CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, feature/**]
     paths: ['muykol-chatbot-infra/**']
   pull_request:
-    branches: [main, develop]
+    branches: [main, feature/**]
     paths: ['muykol-chatbot-infra/**']
 
 permissions:
@@ -129,26 +129,3 @@ jobs:
               > Note: Terraform plan requires AWS credentials to execute fully.
               `
             });
-
-  # Test workflow trigger
-  test-pipeline:
-    name: Test Pipeline
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        
-      - name: Pipeline Test
-        run: |
-          echo "🚀 GitHub Actions Pipeline Test"
-          echo "Repository: ${{ github.repository }}"
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Event: ${{ github.event_name }}"
-          echo "Actor: ${{ github.actor }}"
-          echo "Workflow: ${{ github.workflow }}"
-          echo ""
-          echo "✅ Infrastructure files detected:"
-          find muykol-chatbot-infra -name "*.tf" -type f | head -10
-          echo ""
-          echo "✅ Pipeline is working correctly!"
