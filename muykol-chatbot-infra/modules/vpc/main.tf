@@ -6,6 +6,9 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
 # VPC
 resource "aws_vpc" "main" {
   cidr_block           = var.vpc_cidr
@@ -138,6 +141,21 @@ resource "aws_flow_log" "vpc_flow_log" {
   vpc_id          = aws_vpc.main.id
 }
 
+# Default Security Group - Restrict all traffic
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.main.id
+
+  # Remove all ingress rules
+  ingress = []
+
+  # Remove all egress rules  
+  egress = []
+
+  tags = {
+    Name = "${var.project_name}-default-sg-restricted"
+  }
+}
+
 # CloudWatch Log Group for VPC Flow Logs
 resource "aws_cloudwatch_log_group" "vpc_flow_log" {
   name              = "/aws/vpc/flowlogs/${var.project_name}"
@@ -183,7 +201,10 @@ resource "aws_iam_role_policy" "flow_log" {
           "logs:DescribeLogStreams"
         ]
         Effect   = "Allow"
-        Resource = "*"
+        Resource = [
+          "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/vpc/flowlogs/${var.project_name}",
+          "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/vpc/flowlogs/${var.project_name}:*"
+        ]
       }
     ]
   })

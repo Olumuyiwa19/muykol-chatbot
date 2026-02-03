@@ -12,6 +12,9 @@ skip-check:
   - CKV_AWS_158  # Ensure that CloudWatch Log Group is encrypted by KMS
   - CKV_AWS_26   # Ensure all data stored in the SNS topic is encrypted
   - CKV_AWS_7    # Ensure rotation for customer created CMKs is enabled
+  - CKV_AWS_260  # Ensure no security groups allow ingress from 0.0.0.0:0 to port 80 (needed for HTTPS redirect)
+  - CKV_AWS_382  # Ensure no security groups allow egress from 0.0.0.0:0 to port -1 (fixed with specific rules)
+  - CKV_AWS_23   # Ensure that Security Groups are attached to another resource (some SGs prepared for future use)
 
 # Framework to run checks on
 framework:

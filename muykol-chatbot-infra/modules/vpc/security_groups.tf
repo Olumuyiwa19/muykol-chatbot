@@ -15,23 +15,36 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # HTTP redirect (optional, for HTTPS redirect)
+  # HTTP redirect (optional, for HTTPS redirect) - restricted to specific use case
   ingress {
-    description = "HTTP from internet (redirect to HTTPS)"
+    description = "HTTP from internet (redirect to HTTPS only)"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Outbound to all (will be restricted by ECS security group)
-  egress {
-    description = "All outbound traffic"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  # No default egress rules - will be added via separate resource to avoid circular dependency
+
+  tags = {
+    Name = "${var.project_name}-alb-sg"
   }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Security Group Rule for ALB egress to ECS (separate resource to avoid cycle)
+resource "aws_security_group_rule" "alb_to_ecs" {
+  type                     = "egress"
+  from_port                = 8000
+  to_port                  = 8000
+  protocol                 = "tcp"
+  source_security_group_id = aws_security_group.ecs_tasks.id
+  security_group_id        = aws_security_group.alb.id
+  description              = "ALB to ECS tasks on port 8000"
+}
 
   tags = {
     Name = "${var.project_name}-alb-sg"
@@ -93,21 +106,12 @@ resource "aws_security_group" "ecs_tasks" {
   }
 }
 
-# Security Group Rule for ALB to ECS (separate resource to avoid cycle)
-resource "aws_security_group_rule" "alb_to_ecs" {
-  type                     = "egress"
-  from_port                = 8000
-  to_port                  = 8000
-  protocol                 = "tcp"
-  source_security_group_id = aws_security_group.ecs_tasks.id
-  security_group_id        = aws_security_group.alb.id
-  description              = "ALB to ECS tasks on port 8000"
-}
-
 # Lambda Security Group (for future prayer request processing)
+# Note: This security group is prepared for future Lambda functions
+# and will be attached when Lambda resources are implemented
 resource "aws_security_group" "lambda" {
   name_prefix = "${var.project_name}-lambda-"
-  description = "Security group for Lambda functions"
+  description = "Security group for Lambda functions (prepared for future use)"
   vpc_id      = aws_vpc.main.id
 
   # Outbound to VPC endpoints for AWS services
@@ -147,9 +151,11 @@ resource "aws_security_group" "lambda" {
 }
 
 # RDS Security Group (if database is needed in future)
+# Note: This security group is prepared for future RDS instances
+# and will be attached when database resources are implemented
 resource "aws_security_group" "rds" {
   name_prefix = "${var.project_name}-rds-"
-  description = "Security group for RDS database"
+  description = "Security group for RDS database (prepared for future use)"
   vpc_id      = aws_vpc.main.id
 
   # Inbound from ECS tasks and Lambda functions
