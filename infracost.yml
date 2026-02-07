@@ -8,8 +8,8 @@ projects:
   - path: muykol-chatbot-infra
     name: muykol-chatbot-dev
     terraform_var_files:
-      - muykol-chatbot-infra/dev.tfvars
-    usage_file: muykol-chatbot-infra/infracost-usage-dev.yml
+      - dev.tfvars
+    usage_file: infracost-usage-dev.yml
 
   # Staging environment (when ready)
   # - path: muykol-chatbot-infra

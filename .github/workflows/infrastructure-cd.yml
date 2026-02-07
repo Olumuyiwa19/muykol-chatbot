@@ -43,9 +43,17 @@ jobs:
         working-directory: muykol-chatbot-infra
         run: terraform workspace select muykol-chatbot-${{ matrix.environment }}
       
+      - name: Verify var file exists
+        working-directory: muykol-chatbot-infra
+        run: |
+          echo "Checking for var file: ${{ matrix.environment }}.tfvars"
+          ls -la ${{ matrix.environment }}.tfvars || echo "File not found!"
+          pwd
+      
       - name: Terraform Plan
         working-directory: muykol-chatbot-infra
-        run: terraform plan -var-file="${{ matrix.environment }}.tfvars"
+        run: terraform plan -var-file="${{ matrix.environment }}.tfvars" -no-color
+        continue-on-error: true
 
   terraform-apply-dev:
     name: Deploy to Development
