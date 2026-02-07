@@ -129,3 +129,64 @@ jobs:
               > Note: Terraform plan requires AWS credentials to execute fully.
               `
             });
+
+  # Infracost - Cost estimation for infrastructure changes
+  infracost:
+    name: Infracost
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [terraform-validate]
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: '${{ github.event.pull_request.base.ref }}'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init (base)
+        run: terraform init -backend=false
+        working-directory: muykol-chatbot-infra
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate Infracost cost estimate baseline
+        run: |
+          infracost breakdown --path=muykol-chatbot-infra \
+            --terraform-var-file=muykol-chatbot-infra/dev.tfvars \
+            --format=json \
+            --out-file=/tmp/infracost-base.json
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Terraform Init (PR)
+        run: terraform init -backend=false
+        working-directory: muykol-chatbot-infra
+
+      - name: Generate Infracost diff
+        run: |
+          infracost diff --path=muykol-chatbot-infra \
+            --terraform-var-file=muykol-chatbot-infra/dev.tfvars \
+            --format=json \
+            --compare-to=/tmp/infracost-base.json \
+            --out-file=/tmp/infracost.json
+
+      - name: Post Infracost comment
+        run: |
+          infracost comment github --path=/tmp/infracost.json \
+            --repo=$GITHUB_REPOSITORY \
+            --github-token=${{ secrets.GITHUB_TOKEN }} \
+            --pull-request=${{ github.event.pull_request.number }} \
+            --behavior=update
