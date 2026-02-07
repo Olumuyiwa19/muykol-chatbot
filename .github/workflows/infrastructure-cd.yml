@@ -1,5 +1,5 @@
 # Terraform Cloud Integration
-name: Terraform Cloud
+name: Infrastructure Deployment - Terraform Cloud
 
 on:
   push:
@@ -43,16 +43,9 @@ jobs:
         working-directory: muykol-chatbot-infra
         run: terraform workspace select muykol-chatbot-${{ matrix.environment }}
       
-      - name: Verify var file exists
-        working-directory: muykol-chatbot-infra
-        run: |
-          echo "Checking for var file: ${{ matrix.environment }}.tfvars"
-          ls -la ${{ matrix.environment }}.tfvars || echo "File not found!"
-          pwd
-      
       - name: Terraform Plan
         working-directory: muykol-chatbot-infra
-        run: terraform plan -var-file="${{ matrix.environment }}.tfvars" -no-color
+        run: terraform plan -no-color
         continue-on-error: true
 
   terraform-apply-dev:
@@ -79,7 +72,7 @@ jobs:
       
       - name: Terraform Apply Dev
         working-directory: muykol-chatbot-infra
-        run: terraform apply -auto-approve -var-file="dev.tfvars"
+        run: terraform apply -auto-approve
 
   # terraform-apply-staging:
   #   name: Deploy to Staging
