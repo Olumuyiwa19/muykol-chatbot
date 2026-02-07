@@ -85,8 +85,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (if available)
-        if: ${{ vars.AWS_CONFIGURED == 'true' }}
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
@@ -97,23 +96,27 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
 
       - name: Terraform Init
         run: terraform init -backend=false
         working-directory: muykol-chatbot-infra
-        continue-on-error: true
 
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -var-file="dev.tfvars" -no-color -out=tfplan || echo "Plan failed - this is expected without AWS credentials"
+          terraform plan -var-file="dev.tfvars" -no-color -out=tfplan
         working-directory: muykol-chatbot-infra
         continue-on-error: true
 
-      - name: Comment PR with Status
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
+            const planStatus = '${{ steps.plan.outcome }}';
+            const planResult = planStatus === 'success' ? '✅ **Terraform Plan**: Succeeded' : '⚠️ **Terraform Plan**: Failed or skipped';
+            
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -123,10 +126,11 @@ jobs:
               ✅ **Terraform Format**: Passed
               ✅ **Terraform Validate**: Passed  
               ✅ **Security Scan**: Completed
+              ${planResult}
               
               Infrastructure configuration is valid and ready for deployment.
               
-              > Note: Terraform plan requires AWS credentials to execute fully.
+              > Note: Full plan requires AWS credentials. Check workflow logs for details.
               `
             });
 
