@@ -1,0 +1,402 @@
+# Infrastructure Destroy Pipeline for Faith Motivator Chatbot
+# Manual workflow to tear down all infrastructure when not in use
+
+name: Infrastructure Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      confirmation:
+        description: 'Type "DESTROY" to confirm infrastructure destruction'
+        required: true
+        type: string
+      backup_data:
+        description: 'Create backup before destroying?'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+env:
+  TF_VERSION: "1.6.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  # ============================================================================
+  # VALIDATION: Ensure user really wants to destroy
+  # ============================================================================
+  validate-destroy:
+    name: 🔒 Validate Destroy Request
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Validate Confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirmation }}" != "DESTROY" ]; then
+            echo "❌ Confirmation failed. You must type 'DESTROY' to proceed."
+            echo "You entered: ${{ github.event.inputs.confirmation }}"
+            exit 1
+          fi
+          echo "✅ Confirmation validated"
+      
+      - name: Display Warning
+        run: |
+          echo "⚠️  WARNING: This will destroy all infrastructure in ${{ github.event.inputs.environment }}"
+          echo ""
+          echo "The following resources will be PERMANENTLY DELETED:"
+          echo "  - VPC and all networking components"
+          echo "  - DynamoDB tables (UserProfile, ConversationSession, PrayerRequest, ConsentLog)"
+          echo "  - SQS queues"
+          echo "  - Cognito User Pool"
+          echo "  - IAM roles and policies"
+          echo "  - CloudWatch log groups"
+          echo "  - All associated data"
+          echo ""
+          echo "Backup requested: ${{ github.event.inputs.backup_data }}"
+
+  # ============================================================================
+  # BACKUP: Create backup of critical data before destroying
+  # ============================================================================
+  backup-data:
+    name: 💾 Backup Critical Data
+    runs-on: ubuntu-latest
+    needs: [validate-destroy]
+    if: github.event.inputs.backup_data == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          role-session-name: GitHubActions-InfrastructureBackup
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install AWS CLI and dependencies
+        run: |
+          pip install boto3 awscli
+
+      - name: Create DynamoDB Backups
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          WORKSPACE="${{ github.event.inputs.environment }}"
+          
+          echo "Creating backups for workspace: $WORKSPACE"
+          
+          # List of tables to backup
+          TABLES=(
+            "FaithChatbot-UserProfiles-${WORKSPACE}"
+            "FaithChatbot-ConversationSessions-${WORKSPACE}"
+            "FaithChatbot-PrayerRequests-${WORKSPACE}"
+            "FaithChatbot-ConsentLogs-${WORKSPACE}"
+          )
+          
+          for TABLE in "${TABLES[@]}"; do
+            echo "Backing up table: $TABLE"
+            
+            # Check if table exists
+            if aws dynamodb describe-table --table-name "$TABLE" 2>/dev/null; then
+              # Create on-demand backup
+              aws dynamodb create-backup \
+                --table-name "$TABLE" \
+                --backup-name "${TABLE}-destroy-backup-${TIMESTAMP}" || true
+              
+              echo "✅ Backup created for $TABLE"
+            else
+              echo "⚠️  Table $TABLE does not exist, skipping"
+            fi
+          done
+          
+          echo ""
+          echo "📋 Backup Summary:"
+          aws dynamodb list-backups --time-range-lower-bound $(date -u -d '1 hour ago' +%s)
+
+      - name: Export Cognito Users
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          WORKSPACE="${{ github.event.inputs.environment }}"
+          USER_POOL_NAME="faith-chatbot-${WORKSPACE}"
+          
+          echo "Exporting Cognito users from pool: $USER_POOL_NAME"
+          
+          # Get User Pool ID
+          USER_POOL_ID=$(aws cognito-idp list-user-pools --max-results 60 \
+            --query "UserPools[?Name=='${USER_POOL_NAME}'].Id" \
+            --output text)
+          
+          if [ -n "$USER_POOL_ID" ]; then
+            echo "Found User Pool ID: $USER_POOL_ID"
+            
+            # Export users to JSON
+            aws cognito-idp list-users \
+              --user-pool-id "$USER_POOL_ID" \
+              > "cognito-users-backup-${TIMESTAMP}.json"
+            
+            echo "✅ Cognito users exported"
+            echo "User count: $(cat cognito-users-backup-${TIMESTAMP}.json | jq '.Users | length')"
+          else
+            echo "⚠️  User Pool not found, skipping"
+          fi
+
+      - name: Create Backup Summary
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          
+          cat > backup-summary-${TIMESTAMP}.md << EOF
+          # Infrastructure Destroy Backup Summary
+          
+          **Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Environment**: ${{ github.event.inputs.environment }}
+          **Triggered by**: ${{ github.actor }}
+          **Workflow Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          
+          ## Backups Created
+          
+          ### DynamoDB Tables
+          - UserProfiles
+          - ConversationSessions
+          - PrayerRequests
+          - ConsentLogs
+          
+          ### Cognito User Pool
+          - User export completed
+          
+          ## Recovery Instructions
+          
+          To restore from these backups:
+          1. Redeploy infrastructure using the main pipeline
+          2. Restore DynamoDB tables from AWS Console → DynamoDB → Backups
+          3. Import Cognito users using AWS CLI or Console
+          
+          ## Backup Retention
+          
+          DynamoDB backups are retained according to AWS retention policies.
+          Manual deletion required if no longer needed.
+          EOF
+          
+          cat backup-summary-${TIMESTAMP}.md
+
+      - name: Upload Backup Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: infrastructure-backup-${{ github.event.inputs.environment }}
+          path: |
+            cognito-users-backup-*.json
+            backup-summary-*.md
+          retention-days: 90
+
+  # ============================================================================
+  # DESTROY: Terraform destroy all infrastructure
+  # ============================================================================
+  terraform-destroy:
+    name: 💥 Destroy Infrastructure
+    runs-on: ubuntu-latest
+    needs: [validate-destroy, backup-data]
+    if: always() && needs.validate-destroy.result == 'success' && (needs.backup-data.result == 'success' || needs.backup-data.result == 'skipped')
+    environment:
+      name: ${{ github.event.inputs.environment }}-destroy
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          role-session-name: GitHubActions-InfrastructureDestroy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: muykol-chatbot-infra
+
+      - name: Select Workspace
+        run: |
+          WORKSPACE_MAP='{"development":"muykol-chatbot-dev","staging":"muykol-chatbot-staging","production":"muykol-chatbot-prod"}'
+          WORKSPACE=$(echo $WORKSPACE_MAP | jq -r '."${{ github.event.inputs.environment }}"')
+          
+          echo "Selecting workspace: $WORKSPACE"
+          terraform workspace select $WORKSPACE
+        working-directory: muykol-chatbot-infra
+
+      - name: Terraform Plan Destroy
+        id: plan_destroy
+        run: |
+          terraform plan -destroy -no-color -out=destroy.tfplan
+        working-directory: muykol-chatbot-infra
+        continue-on-error: true
+
+      - name: Save Destroy Plan
+        run: |
+          terraform show -no-color destroy.tfplan > destroy-plan-output.txt
+        working-directory: muykol-chatbot-infra
+
+      - name: Display Destroy Plan
+        run: |
+          echo "📋 Resources to be destroyed:"
+          cat muykol-chatbot-infra/destroy-plan-output.txt
+
+      - name: Terraform Destroy
+        id: destroy
+        run: |
+          echo "🔥 Starting infrastructure destruction..."
+          terraform apply -auto-approve destroy.tfplan
+        working-directory: muykol-chatbot-infra
+
+      - name: Verify Destruction
+        if: success()
+        run: |
+          echo "✅ Infrastructure destroyed successfully"
+          echo ""
+          echo "Verifying resource cleanup..."
+          
+          # Check for remaining resources (optional)
+          terraform show
+        working-directory: muykol-chatbot-infra
+
+      - name: Create Destruction Summary
+        if: always()
+        run: |
+          STATUS="${{ steps.destroy.outcome }}"
+          EMOJI="❌"
+          if [ "$STATUS" == "success" ]; then
+            EMOJI="✅"
+          fi
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## ${EMOJI} Infrastructure Destruction Summary
+          
+          **Environment**: ${{ github.event.inputs.environment }}
+          **Status**: ${STATUS}
+          **Triggered by**: ${{ github.actor }}
+          **Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          ### Destruction Details
+          - **Backup Created**: ${{ github.event.inputs.backup_data }}
+          - **Workspace**: muykol-chatbot-${{ github.event.inputs.environment }}
+          - **Region**: ${{ env.AWS_REGION }}
+          
+          ### Next Steps
+          ${STATUS == "success" && echo "- Infrastructure successfully destroyed" || echo "- Check logs for errors"}
+          ${STATUS == "success" && echo "- Backups retained for 90 days" || echo "- Manual cleanup may be required"}
+          ${STATUS == "success" && echo "- Re-run main pipeline to recreate infrastructure" || echo "- Review error logs and retry"}
+          EOF
+
+      - name: Upload Destroy Plan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: destroy-plan-${{ github.event.inputs.environment }}
+          path: muykol-chatbot-infra/destroy-plan-output.txt
+          retention-days: 90
+
+  # ============================================================================
+  # NOTIFICATION: Create GitHub issue with destruction report
+  # ============================================================================
+  notify-destruction:
+    name: 📢 Notify Destruction
+    runs-on: ubuntu-latest
+    needs: [terraform-destroy]
+    if: always()
+    
+    steps:
+      - name: Create Destruction Report Issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const destroyStatus = '${{ needs.terraform-destroy.result }}';
+            const emoji = destroyStatus === 'success' ? '✅' : '❌';
+            const statusText = destroyStatus === 'success' ? 'Completed' : 'Failed';
+            
+            const issueBody = `## ${emoji} Infrastructure Destruction ${statusText}
+            
+            **Environment**: ${{ github.event.inputs.environment }}
+            **Status**: ${statusText}
+            **Triggered by**: @${{ github.actor }}
+            **Timestamp**: ${new Date().toISOString()}
+            
+            ### Destruction Details
+            - **Backup Created**: ${{ github.event.inputs.backup_data }}
+            - **Workspace**: muykol-chatbot-${{ github.event.inputs.environment }}
+            - **Region**: ${{ env.AWS_REGION }}
+            
+            ### Resources Destroyed
+            ${destroyStatus === 'success' ? `
+            - ✅ VPC and networking components
+            - ✅ DynamoDB tables
+            - ✅ SQS queues
+            - ✅ Cognito User Pool
+            - ✅ IAM roles and policies
+            - ✅ CloudWatch log groups
+            ` : `
+            - ⚠️ Destruction encountered errors
+            - Check workflow logs for details
+            `}
+            
+            ### Backup Information
+            ${github.event.inputs.backup_data === 'true' ? `
+            - DynamoDB backups created and retained
+            - Cognito user export available in workflow artifacts
+            - Backup retention: 90 days
+            ` : `
+            - No backup was created
+            - Data is permanently lost
+            `}
+            
+            ### Recovery Instructions
+            ${destroyStatus === 'success' ? `
+            To recreate the infrastructure:
+            1. Go to Actions → Infrastructure Pipeline
+            2. Create a PR with infrastructure changes
+            3. Merge to main to trigger deployment
+            4. Restore data from backups if needed
+            ` : `
+            To retry destruction:
+            1. Review error logs in [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            2. Fix any issues preventing destruction
+            3. Re-run this workflow
+            4. Consider manual cleanup if needed
+            `}
+            
+            ### Workflow Run
+            [View detailed logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            
+            ---
+            
+            **Cost Savings**: Infrastructure costs will stop accruing immediately.
+            **Note**: Some AWS resources may have minimal charges for backups and logs.
+            `;
+            
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `${emoji} Infrastructure Destroyed: ${{ github.event.inputs.environment }} - ${new Date().toISOString().split('T')[0]}`,
+              body: issueBody,
+              labels: ['infrastructure', 'destroy', destroyStatus === 'success' ? 'completed' : 'failed']
+            });

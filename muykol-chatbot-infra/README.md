@@ -104,6 +104,44 @@ Each workspace should have:
 - **Working Directory**: `muykol-chatbot-infra`
 - **VCS Triggers**: `muykol-chatbot-infra/**/*`
 
+## Infrastructure Lifecycle Management
+
+### Deploying Infrastructure
+Infrastructure is automatically deployed via GitHub Actions when changes are merged to main:
+1. Create PR with infrastructure changes
+2. Review terraform plan in PR comments
+3. Merge PR to trigger deployment
+4. Monitor deployment in Actions tab
+
+See [Infrastructure Pipeline Guide](../.github/INFRASTRUCTURE_PIPELINE.md) for details.
+
+### Destroying Infrastructure (Cost Savings)
+For personal projects, you can destroy infrastructure when not in use to save costs (~$50-100/month):
+
+**Quick Destroy:**
+1. Go to GitHub → Actions → Infrastructure Destroy
+2. Click "Run workflow"
+3. Select environment: `development`
+4. Type confirmation: `DESTROY`
+5. Enable backup: `true` ✅
+6. Wait 10 minutes for completion
+
+**Quick Restore:**
+1. Create PR with infrastructure changes
+2. Merge to main
+3. Wait 10 minutes for deployment
+4. Optionally restore data from backups
+
+**Documentation:**
+- 📖 [Full Destroy Guide](./INFRASTRUCTURE_DESTROY_GUIDE.md) - Complete instructions
+- 🚀 [Quick Reference](./DESTROY_QUICK_REFERENCE.md) - Fast lookup guide
+
+**Cost Savings:**
+- NAT Gateway: ~$32/month
+- Application Load Balancer: ~$16/month
+- VPC Endpoints: ~$7/month each
+- **Total savings: $50-100+/month**
+
 ## Troubleshooting
 
 ### Authentication Issues
@@ -118,3 +156,10 @@ Ensure the organization name in `main.tf` matches your Terraform Cloud organizat
 
 ### Permission Errors
 Check AWS IAM permissions for the credentials configured in the workspace.
+
+### Destroy Failures
+If infrastructure destruction fails:
+1. Check AWS Console for blocking resources
+2. Manually delete ENIs, Lambda functions, or other dependencies
+3. Re-run destroy workflow
+4. See [Destroy Guide](./INFRASTRUCTURE_DESTROY_GUIDE.md) for detailed troubleshooting
