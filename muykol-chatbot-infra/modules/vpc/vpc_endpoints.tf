@@ -153,7 +153,3 @@ resource "aws_vpc_endpoint" "dynamodb" {
     Name = "${var.project_name}-dynamodb-endpoint"
   }
 }
-
-# Data sources for region and account
-data "aws_region" "current" {}
-data "aws_caller_identity" "current" {}

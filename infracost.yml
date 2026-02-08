@@ -1,0 +1,32 @@
+version: 0.1
+
+# Infracost configuration for muykol-chatbot infrastructure
+# This file defines multiple projects for different environments
+
+projects:
+  # Development environment
+  - path: muykol-chatbot-infra
+    name: muykol-chatbot-dev
+    terraform_var_files:
+      - dev.tfvars
+    usage_file: infracost-usage-dev.yml
+
+  # Staging environment (when ready)
+  # - path: muykol-chatbot-infra
+  #   name: muykol-chatbot-staging
+  #   terraform_var_files:
+  #     - muykol-chatbot-infra/staging.tfvars
+  #   usage_file: muykol-chatbot-infra/infracost-usage-staging.yml
+
+  # Production environment (when ready)
+  # - path: muykol-chatbot-infra
+  #   name: muykol-chatbot-prod
+  #   terraform_var_files:
+  #     - muykol-chatbot-infra/prod.tfvars
+  #   usage_file: muykol-chatbot-infra/infracost-usage-prod.yml
+
+# Currency for cost estimates
+currency: USD
+
+# Enable cloud pricing API
+enable_cloud_for_organization: true

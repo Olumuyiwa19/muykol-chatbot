@@ -1,0 +1,87 @@
+# Infracost usage file for development environment
+# This file provides usage estimates for resources that have variable costs
+# Update these values based on your expected usage patterns
+
+version: 0.1
+
+resource_type_default_usage:
+  # DynamoDB Tables - On-Demand Pricing
+  aws_dynamodb_table:
+    storage_gb: 1 # Expected storage in GB
+    monthly_write_request_units: 100000 # Write requests per month (dev: low traffic)
+    monthly_read_request_units: 500000 # Read requests per month (dev: low traffic)
+
+  # SQS Queues
+  aws_sqs_queue:
+    request_size_kb: 4 # Average message size in KB
+    monthly_requests: 50000 # Total requests per month (dev: moderate usage)
+
+  # CloudWatch Log Groups
+  aws_cloudwatch_log_group:
+    storage_gb: 5 # Expected log storage in GB
+    monthly_data_ingested_gb: 10 # Data ingested per month in GB
+    monthly_data_scanned_gb: 5 # Data scanned by Insights queries
+
+  # NAT Gateway (disabled in dev, but included for reference)
+  aws_nat_gateway:
+    monthly_data_processed_gb: 0 # Disabled in dev environment
+
+  # VPC Endpoints - Interface Endpoints
+  aws_vpc_endpoint:
+    monthly_data_processed_gb: 50 # Data processed through endpoints per month
+
+resource_usage:
+  # User Profiles Table
+  module.dynamodb.aws_dynamodb_table.user_profiles:
+    storage_gb: 0.5
+    monthly_write_request_units: 10000 # New users + profile updates
+    monthly_read_request_units: 100000 # User lookups
+
+  # Conversation History Table
+  module.dynamodb.aws_dynamodb_table.conversation_history:
+    storage_gb: 2
+    monthly_write_request_units: 50000 # Chat messages
+    monthly_read_request_units: 200000 # Message retrieval
+
+  # Prayer Requests Table
+  module.dynamodb.aws_dynamodb_table.prayer_requests:
+    storage_gb: 0.5
+    monthly_write_request_units: 5000 # New prayer requests
+    monthly_read_request_units: 20000 # Prayer request queries
+
+  # Prayer Connect Table
+  module.dynamodb.aws_dynamodb_table.prayer_connect:
+    storage_gb: 0.2
+    monthly_write_request_units: 2000 # Prayer connections
+    monthly_read_request_units: 10000 # Connection lookups
+
+  # Prayer Request Queue
+  module.sqs.aws_sqs_queue.prayer_requests:
+    request_size_kb: 2
+    monthly_requests: 10000 # Prayer requests sent to queue (within free tier)
+
+  # VPC Flow Logs
+  module.vpc.aws_cloudwatch_log_group.vpc_flow_log:
+    storage_gb: 2
+    monthly_data_ingested_gb: 5
+    monthly_data_scanned_gb: 1
+
+  # Bedrock Runtime Endpoint
+  module.vpc.aws_vpc_endpoint.interface_endpoints["bedrock-runtime"]:
+    monthly_data_processed_gb: 20 # AI model requests/responses
+
+  # DynamoDB Endpoint (Gateway - Free)
+  # module.vpc.aws_vpc_endpoint.dynamodb:
+  #   monthly_data_processed_gb: 30
+
+  # S3 Endpoint (Gateway - Free)
+  # module.vpc.aws_vpc_endpoint.s3:
+  #   monthly_data_processed_gb: 10
+
+# Notes:
+# - Gateway endpoints (S3, DynamoDB) are free and don't incur data processing charges
+# - Interface endpoints charge $0.01/hour (~$7.20/month) + $0.01/GB data processed
+# - DynamoDB on-demand pricing: $1.25 per million write requests, $0.25 per million read requests
+# - SQS first 1 million requests per month are free
+# - CloudWatch Logs: $0.50/GB ingested, $0.005/GB stored per month
+# - Adjust these values based on your actual usage patterns

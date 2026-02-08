@@ -1,0 +1,329 @@
+# Infrastructure CI/CD Pipeline for Faith Motivator Chatbot
+# Consolidated pipeline: Validation → Security → Plan → Apply
+
+name: Infrastructure Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths: ['muykol-chatbot-infra/**']
+  pull_request:
+    branches: [main]
+    paths: ['muykol-chatbot-infra/**']
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  security-events: write
+
+env:
+  TF_VERSION: "1.6.0"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  # ============================================================================
+  # STAGE 1: TERRAFORM VALIDATION
+  # ============================================================================
+  terraform-validate:
+    name: 1️⃣ Terraform Validation
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+        working-directory: muykol-chatbot-infra
+
+      - name: Terraform Init (validation only)
+        run: terraform init -backend=false
+        working-directory: muykol-chatbot-infra
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: muykol-chatbot-infra
+
+  # ============================================================================
+  # STAGE 2: SECURITY SCAN
+  # ============================================================================
+  security-scan:
+    name: 2️⃣ Security Scan
+    runs-on: ubuntu-latest
+    needs: [terraform-validate]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Checkov Security Scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: muykol-chatbot-infra/
+          framework: terraform
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          download_external_modules: true
+          soft_fail: true
+          config_file: muykol-chatbot-infra/.checkov.yml
+
+      - name: Upload Checkov results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+
+  # ============================================================================
+  # STAGE 3: TERRAFORM PLAN
+  # ============================================================================
+  terraform-plan:
+    name: 3️⃣ Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [terraform-validate, security-scan]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          role-session-name: GitHubActions-TerraformPlan
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: muykol-chatbot-infra
+
+      - name: Select Workspace
+        run: terraform workspace select muykol-chatbot-dev || terraform workspace new muykol-chatbot-dev
+        working-directory: muykol-chatbot-infra
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color -out=tfplan
+        working-directory: muykol-chatbot-infra
+        continue-on-error: true
+
+      - name: Save Plan Output
+        if: github.event_name == 'pull_request'
+        run: |
+          terraform show -no-color tfplan > plan-output.txt
+        working-directory: muykol-chatbot-infra
+        continue-on-error: true
+
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planStatus = '${{ steps.plan.outcome }}';
+            
+            let planOutput = '';
+            try {
+              planOutput = fs.readFileSync('muykol-chatbot-infra/plan-output.txt', 'utf8');
+              // Truncate if too long
+              if (planOutput.length > 60000) {
+                planOutput = planOutput.substring(0, 60000) + '\n\n... (truncated)';
+              }
+            } catch (error) {
+              planOutput = 'Plan output not available';
+            }
+            
+            const statusEmoji = planStatus === 'success' ? '✅' : '⚠️';
+            
+            const comment = `## Infrastructure Pipeline Results
+            
+            ### Stage 1: Terraform Validation
+            ✅ **Format Check**: Passed
+            ✅ **Terraform Init**: Passed
+            ✅ **Terraform Validate**: Passed
+            
+            ### Stage 2: Security Scan
+            ✅ **Checkov Scan**: Completed (check Security tab for details)
+            
+            ### Stage 3: Terraform Plan
+            ${statusEmoji} **Plan Status**: ${planStatus === 'success' ? 'Succeeded' : 'Failed'}
+            
+            <details>
+            <summary>📋 Show Plan Output</summary>
+            
+            \`\`\`terraform
+            ${planOutput}
+            \`\`\`
+            
+            </details>
+            
+            ---
+            
+            **Next Steps:**
+            - Review the plan output above
+            - Check security scan results in the Security tab
+            - If everything looks good, approve and merge this PR
+            - Terraform Apply will run automatically after merge
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  # ============================================================================
+  # STAGE 3B: INFRACOST (Parallel with Plan)
+  # ============================================================================
+  infracost:
+    name: 3️⃣ Cost Estimation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [terraform-validate, security-scan]
+    permissions:
+      contents: read
+      pull-requests: write
+    
+    steps:
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: '${{ github.event.pull_request.base.ref }}'
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Terraform Init (base)
+        run: terraform init -backend=false
+        working-directory: muykol-chatbot-infra
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Generate Infracost cost estimate baseline
+        run: |
+          infracost breakdown --path=muykol-chatbot-infra \
+            --format=json \
+            --out-file=/tmp/infracost-base.json
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Terraform Init (PR)
+        run: terraform init -backend=false
+        working-directory: muykol-chatbot-infra
+
+      - name: Generate Infracost diff
+        run: |
+          infracost diff --path=muykol-chatbot-infra \
+            --format=json \
+            --compare-to=/tmp/infracost-base.json \
+            --out-file=/tmp/infracost.json
+
+      - name: Post Infracost comment
+        run: |
+          infracost comment github --path=/tmp/infracost.json \
+            --repo=$GITHUB_REPOSITORY \
+            --github-token=${{ secrets.GITHUB_TOKEN }} \
+            --pull-request=${{ github.event.pull_request.number }} \
+            --behavior=update
+
+  # ============================================================================
+  # STAGE 4: TERRAFORM APPLY (Only on merge to main)
+  # ============================================================================
+  terraform-apply:
+    name: 4️⃣ Terraform Apply
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [terraform-validate, security-scan, terraform-plan]
+    environment:
+      name: development
+      url: https://dev.faithchatbot.com
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          role-session-name: GitHubActions-TerraformApply
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: muykol-chatbot-infra
+
+      - name: Select Workspace
+        run: terraform workspace select muykol-chatbot-dev
+        working-directory: muykol-chatbot-infra
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+        working-directory: muykol-chatbot-infra
+
+      - name: Create Deployment Summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** Development" >> $GITHUB_STEP_SUMMARY
+          echo "**Workspace:** muykol-chatbot-dev" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Infrastructure Changes Applied ✅" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify on Failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 Infrastructure Deployment Failed',
+              body: `## Deployment Failure Alert
+              
+              **Workflow:** Infrastructure Pipeline
+              **Stage:** Terraform Apply
+              **Branch:** ${context.ref}
+              **Commit:** ${context.sha}
+              **Actor:** ${context.actor}
+              
+              **Action Required:**
+              1. Check the [workflow logs](${context.payload.repository.html_url}/actions/runs/${context.runId})
+              2. Review the Terraform error messages
+              3. Fix the issue and push a new commit
+              
+              **Workflow Run:** ${context.payload.repository.html_url}/actions/runs/${context.runId}
+              `,
+              labels: ['infrastructure', 'deployment-failure', 'urgent']
+            });
