@@ -223,7 +223,18 @@ jobs:
         run: |
           infracost breakdown --path=muykol-chatbot-infra \
             --format=json \
-            --out-file=/tmp/infracost-base.json
+            --out-file=/tmp/infracost-base.json \
+            --terraform-var="aws_region=us-east-1" \
+            --terraform-var="project_name=muykol-chatbot" \
+            --terraform-var="vpc_cidr=172.20.0.0/16" \
+            --terraform-var='availability_zones=["us-east-1a","us-east-1b"]' \
+            --terraform-var='public_subnet_cidrs=["172.20.1.0/24","172.20.2.0/24"]' \
+            --terraform-var='private_subnet_cidrs=["172.20.3.0/24","172.20.4.0/24"]' \
+            --terraform-var="enable_nat_gateway=true" \
+            --terraform-var="enable_vpn_gateway=false" \
+            --terraform-var="cognito_domain=infracost-placeholder" \
+            --terraform-var='callback_urls=["https://example.com/callback"]' \
+            --terraform-var='logout_urls=["https://example.com/logout"]'
 
       - name: Checkout PR branch
         uses: actions/checkout@v4
@@ -237,7 +248,18 @@ jobs:
           infracost diff --path=muykol-chatbot-infra \
             --format=json \
             --compare-to=/tmp/infracost-base.json \
-            --out-file=/tmp/infracost.json
+            --out-file=/tmp/infracost.json \
+            --terraform-var="aws_region=us-east-1" \
+            --terraform-var="project_name=muykol-chatbot" \
+            --terraform-var="vpc_cidr=172.20.0.0/16" \
+            --terraform-var='availability_zones=["us-east-1a","us-east-1b"]' \
+            --terraform-var='public_subnet_cidrs=["172.20.1.0/24","172.20.2.0/24"]' \
+            --terraform-var='private_subnet_cidrs=["172.20.3.0/24","172.20.4.0/24"]' \
+            --terraform-var="enable_nat_gateway=true" \
+            --terraform-var="enable_vpn_gateway=false" \
+            --terraform-var="cognito_domain=infracost-placeholder" \
+            --terraform-var='callback_urls=["https://example.com/callback"]' \
+            --terraform-var='logout_urls=["https://example.com/logout"]'
 
       - name: Post Infracost comment
         run: |
