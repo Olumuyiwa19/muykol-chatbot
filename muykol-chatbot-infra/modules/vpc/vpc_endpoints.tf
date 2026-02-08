@@ -33,10 +33,11 @@ resource "aws_security_group" "vpc_endpoints" {
 }
 
 # Interface VPC Endpoints
+# Note: SES does not have a VPC endpoint - it's accessed via public internet
 locals {
   interface_endpoints = [
     "bedrock-runtime",
-    "ses",
+    "sqs",
     "ecr.api",
     "ecr.dkr",
     "logs",
